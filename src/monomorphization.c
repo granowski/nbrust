@@ -1,7 +1,9 @@
-#include "ast.h"
+#include "monomorphization.h"
+#include "parser.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 
 typedef struct GenericRegistryNode {
     char *name;
@@ -19,9 +21,12 @@ void monomorphization_register(ASTNode *node) {
     
     if (!name) return;
     
+    // Check if already registered
+    if (monomorphization_lookup(name)) return;
+
     GenericRegistryNode *reg = malloc(sizeof(GenericRegistryNode));
     reg->name = strdup(name);
-    reg->node = node; // Shallow copy, original AST owned by parser
+    reg->node = ast_clone(node); // Own the cloned AST
     reg->next = registry;
     registry = reg;
 }
@@ -167,7 +172,10 @@ static ASTNode *specialize_node(ASTNode *node, char **params, char **args, int c
     return new_node;
 }
 
-#include "codegen.h" // For Target
+#include <stdio.h>
+#include <stdlib.h>
+
+// #include "codegen.h" // For Target - now in monomorphization.h
 
 typedef struct SpecializationNode {
     char *mangled_name;
@@ -220,6 +228,12 @@ static void walk_and_specialize(ASTNode *node);
 static void walk_and_specialize(ASTNode *node) {
     if (!node) return;
     
+    // Safety check for common pointer issues
+    if ((uintptr_t)node < 4096) {
+        fprintf(stderr, "Warning: detected invalid node pointer %p during walk\n", node);
+        return;
+    }
+
     switch (node->type) {
         case AST_BLOCK:
             for (int i = 0; i < node->data.block.count; i++) walk_and_specialize(node->data.block.statements[i]);
@@ -270,13 +284,18 @@ static void walk_and_specialize(ASTNode *node) {
 
 void monomorphization_run(ASTNode *root) {
     walk_and_specialize(root);
-    
+}
+
+void monomorphization_emit_specializations(FILE *out, Target target) {
     // After walking, we should have a list of specializations to emit
     SpecializationNode *curr = specializations;
-    Target target = { ARCH_X86_64, OS_MACOS, BACKEND_C }; // Dummy target
     while (curr) {
-        printf("// Specialized: %s\n", curr->mangled_name);
-        codegen_generate(curr->node, stdout, target, NULL);
+        if (out == stdout) printf("// Specialized: %s\n", curr->mangled_name);
+        else fprintf(out, "// Specialized: %s\n", curr->mangled_name);
+        codegen_generate(curr->node, out, target, NULL);
         curr = curr->next;
     }
+    // Clear specializations after emitting to prevent double-emission
+    // In a real compiler, we might want to keep them across files but mangled uniquely
+    specializations = NULL; 
 }

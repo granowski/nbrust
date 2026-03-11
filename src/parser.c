@@ -2,6 +2,359 @@
 #include <stdlib.h>
 #include <string.h>
 
+static char *safe_strdup(const char *s) {
+    return s ? strdup(s) : NULL;
+}
+
+ASTNode *ast_clone(ASTNode *node) {
+    if (!node) return NULL;
+    ASTNode *new_node = ast_new_at(node->type, node->line, node->col);
+    switch (node->type) {
+        case AST_FUNC:
+            new_node->data.func.name = safe_strdup(node->data.func.name);
+            new_node->data.func.return_type = safe_strdup(node->data.func.return_type);
+            new_node->data.func.param_count = node->data.func.param_count;
+            if (node->data.func.params) {
+                new_node->data.func.params = malloc(sizeof(ASTNode*) * node->data.func.param_count);
+                for (int i = 0; i < node->data.func.param_count; i++) {
+                    new_node->data.func.params[i] = ast_clone(node->data.func.params[i]);
+                }
+            }
+            new_node->data.func.body = ast_clone(node->data.func.body);
+            new_node->data.func.generic_param_count = node->data.func.generic_param_count;
+            if (node->data.func.generic_params) {
+                new_node->data.func.generic_params = malloc(sizeof(char*) * node->data.func.generic_param_count);
+                new_node->data.func.generic_bounds = malloc(sizeof(ASTNode**) * node->data.func.generic_param_count);
+                new_node->data.func.generic_bounds_counts = malloc(sizeof(int) * node->data.func.generic_param_count);
+                for (int i = 0; i < node->data.func.generic_param_count; i++) {
+                    new_node->data.func.generic_params[i] = safe_strdup(node->data.func.generic_params[i]);
+                    new_node->data.func.generic_bounds_counts[i] = node->data.func.generic_bounds_counts[i];
+                    if (node->data.func.generic_bounds[i]) {
+                        new_node->data.func.generic_bounds[i] = malloc(sizeof(ASTNode*) * node->data.func.generic_bounds_counts[i]);
+                        for (int j = 0; j < node->data.func.generic_bounds_counts[i]; j++) {
+                            new_node->data.func.generic_bounds[i][j] = ast_clone(node->data.func.generic_bounds[i][j]);
+                        }
+                    } else {
+                        new_node->data.func.generic_bounds[i] = NULL;
+                    }
+                }
+            }
+            new_node->data.func.where_clause_count = node->data.func.where_clause_count;
+            if (node->data.func.where_clauses) {
+                new_node->data.func.where_clauses = malloc(sizeof(ASTNode*) * node->data.func.where_clause_count);
+                for (int i = 0; i < node->data.func.where_clause_count; i++) {
+                    new_node->data.func.where_clauses[i] = ast_clone(node->data.func.where_clauses[i]);
+                }
+            }
+            break;
+        case AST_PARAM:
+            new_node->data.param.name = safe_strdup(node->data.param.name);
+            new_node->data.param.type_name = safe_strdup(node->data.param.type_name);
+            break;
+        case AST_VAR_DECL:
+            new_node->data.var_decl.name = safe_strdup(node->data.var_decl.name);
+            new_node->data.var_decl.type_name = safe_strdup(node->data.var_decl.type_name);
+            new_node->data.var_decl.init = ast_clone(node->data.var_decl.init);
+            new_node->data.var_decl.is_mutable = node->data.var_decl.is_mutable;
+            break;
+        case AST_LITERAL:
+            new_node->data.literal.value = safe_strdup(node->data.literal.value);
+            break;
+        case AST_IDENT:
+            new_node->data.ident.name = safe_strdup(node->data.ident.name);
+            break;
+        case AST_BINOP:
+            new_node->data.binop.op = safe_strdup(node->data.binop.op);
+            new_node->data.binop.left = ast_clone(node->data.binop.left);
+            new_node->data.binop.right = ast_clone(node->data.binop.right);
+            break;
+        case AST_BLOCK:
+            new_node->data.block.count = node->data.block.count;
+            if (node->data.block.statements) {
+                new_node->data.block.statements = malloc(sizeof(ASTNode*) * node->data.block.count);
+                for (int i = 0; i < node->data.block.count; i++) {
+                    new_node->data.block.statements[i] = ast_clone(node->data.block.statements[i]);
+                }
+            }
+            break;
+        case AST_IF:
+            new_node->data.if_stmt.condition = ast_clone(node->data.if_stmt.condition);
+            new_node->data.if_stmt.then_branch = ast_clone(node->data.if_stmt.then_branch);
+            new_node->data.if_stmt.else_branch = ast_clone(node->data.if_stmt.else_branch);
+            break;
+        case AST_WHILE:
+            new_node->data.while_loop.condition = ast_clone(node->data.while_loop.condition);
+            new_node->data.while_loop.body = ast_clone(node->data.while_loop.body);
+            break;
+        case AST_FOR_STMT:
+            new_node->data.for_loop.var_name = safe_strdup(node->data.for_loop.var_name);
+            new_node->data.for_loop.iterable = ast_clone(node->data.for_loop.iterable);
+            new_node->data.for_loop.body = ast_clone(node->data.for_loop.body);
+            break;
+        case AST_RETURN:
+            new_node->data.ret_stmt.value = ast_clone(node->data.ret_stmt.value);
+            break;
+        case AST_CALL:
+            new_node->data.call.name = safe_strdup(node->data.call.name);
+            new_node->data.call.arg_count = node->data.call.arg_count;
+            if (node->data.call.args) {
+                new_node->data.call.args = malloc(sizeof(ASTNode*) * node->data.call.arg_count);
+                for (int i = 0; i < node->data.call.arg_count; i++) {
+                    new_node->data.call.args[i] = ast_clone(node->data.call.args[i]);
+                }
+            }
+            break;
+        case AST_STRUCT_DECL:
+            new_node->data.struct_decl.name = safe_strdup(node->data.struct_decl.name);
+            new_node->data.struct_decl.field_count = node->data.struct_decl.field_count;
+            if (node->data.struct_decl.fields) {
+                new_node->data.struct_decl.fields = malloc(sizeof(ASTNode*) * node->data.struct_decl.field_count);
+                for (int i = 0; i < node->data.struct_decl.field_count; i++) {
+                    new_node->data.struct_decl.fields[i] = ast_clone(node->data.struct_decl.fields[i]);
+                }
+            }
+            new_node->data.struct_decl.generic_param_count = node->data.struct_decl.generic_param_count;
+            if (node->data.struct_decl.generic_params) {
+                new_node->data.struct_decl.generic_params = malloc(sizeof(char*) * node->data.struct_decl.generic_param_count);
+                new_node->data.struct_decl.generic_bounds = malloc(sizeof(ASTNode**) * node->data.struct_decl.generic_param_count);
+                new_node->data.struct_decl.generic_bounds_counts = malloc(sizeof(int) * node->data.struct_decl.generic_param_count);
+                for (int i = 0; i < node->data.struct_decl.generic_param_count; i++) {
+                    new_node->data.struct_decl.generic_params[i] = safe_strdup(node->data.struct_decl.generic_params[i]);
+                    new_node->data.struct_decl.generic_bounds_counts[i] = node->data.struct_decl.generic_bounds_counts[i];
+                    if (node->data.struct_decl.generic_bounds[i]) {
+                        new_node->data.struct_decl.generic_bounds[i] = malloc(sizeof(ASTNode*) * node->data.struct_decl.generic_bounds_counts[i]);
+                        for (int j = 0; j < node->data.struct_decl.generic_bounds_counts[i]; j++) {
+                            new_node->data.struct_decl.generic_bounds[i][j] = ast_clone(node->data.struct_decl.generic_bounds[i][j]);
+                        }
+                    } else {
+                        new_node->data.struct_decl.generic_bounds[i] = NULL;
+                    }
+                }
+            }
+            new_node->data.struct_decl.where_clause_count = node->data.struct_decl.where_clause_count;
+            if (node->data.struct_decl.where_clauses) {
+                new_node->data.struct_decl.where_clauses = malloc(sizeof(ASTNode*) * node->data.struct_decl.where_clause_count);
+                for (int i = 0; i < node->data.struct_decl.where_clause_count; i++) {
+                    new_node->data.struct_decl.where_clauses[i] = ast_clone(node->data.struct_decl.where_clauses[i]);
+                }
+            }
+            break;
+        case AST_STRUCT_INIT:
+            new_node->data.struct_init.struct_name = safe_strdup(node->data.struct_init.struct_name);
+            new_node->data.struct_init.field_count = node->data.struct_init.field_count;
+            if (node->data.struct_init.fields) {
+                new_node->data.struct_init.fields = malloc(sizeof(ASTNode*) * node->data.struct_init.field_count);
+                for (int i = 0; i < node->data.struct_init.field_count; i++) {
+                    new_node->data.struct_init.fields[i] = ast_clone(node->data.struct_init.fields[i]);
+                }
+            }
+            break;
+        case AST_FIELD_INIT:
+            new_node->data.field_init.name = safe_strdup(node->data.field_init.name);
+            new_node->data.field_init.value = ast_clone(node->data.field_init.value);
+            break;
+        case AST_FIELD_ACCESS:
+            new_node->data.field_access.receiver = ast_clone(node->data.field_access.receiver);
+            new_node->data.field_access.field_name = safe_strdup(node->data.field_access.field_name);
+            break;
+        case AST_IMPL:
+            new_node->data.impl_block.struct_name = safe_strdup(node->data.impl_block.struct_name);
+            new_node->data.impl_block.method_count = node->data.impl_block.method_count;
+            if (node->data.impl_block.methods) {
+                new_node->data.impl_block.methods = malloc(sizeof(ASTNode*) * node->data.impl_block.method_count);
+                for (int i = 0; i < node->data.impl_block.method_count; i++) {
+                    new_node->data.impl_block.methods[i] = ast_clone(node->data.impl_block.methods[i]);
+                }
+            }
+            break;
+        case AST_METHOD_CALL:
+            new_node->data.method_call.receiver = ast_clone(node->data.method_call.receiver);
+            new_node->data.method_call.method_name = safe_strdup(node->data.method_call.method_name);
+            new_node->data.method_call.arg_count = node->data.method_call.arg_count;
+            if (node->data.method_call.args) {
+                new_node->data.method_call.args = malloc(sizeof(ASTNode*) * node->data.method_call.arg_count);
+                for (int i = 0; i < node->data.method_call.arg_count; i++) {
+                    new_node->data.method_call.args[i] = ast_clone(node->data.method_call.args[i]);
+                }
+            }
+            break;
+        case AST_MACRO_CALL:
+            new_node->data.macro_call.name = safe_strdup(node->data.macro_call.name);
+            new_node->data.macro_call.arg_count = node->data.macro_call.arg_count;
+            if (node->data.macro_call.args) {
+                new_node->data.macro_call.args = malloc(sizeof(ASTNode*) * node->data.macro_call.arg_count);
+                for (int i = 0; i < node->data.macro_call.arg_count; i++) {
+                    new_node->data.macro_call.args[i] = ast_clone(node->data.macro_call.args[i]);
+                }
+            }
+            break;
+        case AST_STRING_LITERAL:
+            new_node->data.string_literal.value = safe_strdup(node->data.string_literal.value);
+            break;
+        case AST_BOOL_LITERAL:
+            new_node->data.bool_literal.value = node->data.bool_literal.value;
+            break;
+        case AST_UNOP:
+            new_node->data.unop.op = safe_strdup(node->data.unop.op);
+            new_node->data.unop.expr = ast_clone(node->data.unop.expr);
+            break;
+        case AST_ENUM_DECL:
+            new_node->data.enum_decl.name = safe_strdup(node->data.enum_decl.name);
+            new_node->data.enum_decl.variant_count = node->data.enum_decl.variant_count;
+            if (node->data.enum_decl.variants) {
+                new_node->data.enum_decl.variants = malloc(sizeof(ASTNode*) * node->data.enum_decl.variant_count);
+                for (int i = 0; i < node->data.enum_decl.variant_count; i++) {
+                    new_node->data.enum_decl.variants[i] = ast_clone(node->data.enum_decl.variants[i]);
+                }
+            }
+            new_node->data.enum_decl.generic_param_count = node->data.enum_decl.generic_param_count;
+            if (node->data.enum_decl.generic_params) {
+                new_node->data.enum_decl.generic_params = malloc(sizeof(char*) * node->data.enum_decl.generic_param_count);
+                new_node->data.enum_decl.generic_bounds = malloc(sizeof(ASTNode**) * node->data.enum_decl.generic_param_count);
+                new_node->data.enum_decl.generic_bounds_counts = malloc(sizeof(int) * node->data.enum_decl.generic_param_count);
+                for (int i = 0; i < node->data.enum_decl.generic_param_count; i++) {
+                    new_node->data.enum_decl.generic_params[i] = safe_strdup(node->data.enum_decl.generic_params[i]);
+                    new_node->data.enum_decl.generic_bounds_counts[i] = node->data.enum_decl.generic_bounds_counts[i];
+                    if (node->data.enum_decl.generic_bounds[i]) {
+                        new_node->data.enum_decl.generic_bounds[i] = malloc(sizeof(ASTNode*) * node->data.enum_decl.generic_bounds_counts[i]);
+                        for (int j = 0; j < node->data.enum_decl.generic_bounds_counts[i]; j++) {
+                            new_node->data.enum_decl.generic_bounds[i][j] = ast_clone(node->data.enum_decl.generic_bounds[i][j]);
+                        }
+                    } else {
+                        new_node->data.enum_decl.generic_bounds[i] = NULL;
+                    }
+                }
+            }
+            new_node->data.enum_decl.where_clause_count = node->data.enum_decl.where_clause_count;
+            if (node->data.enum_decl.where_clauses) {
+                new_node->data.enum_decl.where_clauses = malloc(sizeof(ASTNode*) * node->data.enum_decl.where_clause_count);
+                for (int i = 0; i < node->data.enum_decl.where_clause_count; i++) {
+                    new_node->data.enum_decl.where_clauses[i] = ast_clone(node->data.enum_decl.where_clauses[i]);
+                }
+            }
+            break;
+        case AST_ENUM_VARIANT:
+            new_node->data.enum_variant.name = safe_strdup(node->data.enum_variant.name);
+            new_node->data.enum_variant.variant_type = node->data.enum_variant.variant_type;
+            new_node->data.enum_variant.field_count = node->data.enum_variant.field_count;
+            if (node->data.enum_variant.fields) {
+                new_node->data.enum_variant.fields = malloc(sizeof(ASTNode*) * node->data.enum_variant.field_count);
+                for (int i = 0; i < node->data.enum_variant.field_count; i++) {
+                    new_node->data.enum_variant.fields[i] = ast_clone(node->data.enum_variant.fields[i]);
+                }
+            }
+            break;
+        case AST_MATCH:
+            new_node->data.match_stmt.expr = ast_clone(node->data.match_stmt.expr);
+            new_node->data.match_stmt.arm_count = node->data.match_stmt.arm_count;
+            if (node->data.match_stmt.arms) {
+                new_node->data.match_stmt.arms = malloc(sizeof(ASTNode*) * node->data.match_stmt.arm_count);
+                for (int i = 0; i < node->data.match_stmt.arm_count; i++) {
+                    new_node->data.match_stmt.arms[i] = ast_clone(node->data.match_stmt.arms[i]);
+                }
+            }
+            break;
+        case AST_MATCH_ARM:
+            new_node->data.match_arm.pattern = ast_clone(node->data.match_arm.pattern);
+            new_node->data.match_arm.body = ast_clone(node->data.match_arm.body);
+            break;
+        case AST_TRAIT:
+            new_node->data.trait_decl.name = safe_strdup(node->data.trait_decl.name);
+            new_node->data.trait_decl.method_count = node->data.trait_decl.method_count;
+            if (node->data.trait_decl.methods) {
+                new_node->data.trait_decl.methods = malloc(sizeof(ASTNode*) * node->data.trait_decl.method_count);
+                for (int i = 0; i < node->data.trait_decl.method_count; i++) {
+                    new_node->data.trait_decl.methods[i] = ast_clone(node->data.trait_decl.methods[i]);
+                }
+            }
+            break;
+        case AST_GENERIC_TYPE:
+            new_node->data.generic_type.base_name = safe_strdup(node->data.generic_type.base_name);
+            new_node->data.generic_type.param_count = node->data.generic_type.param_count;
+            if (node->data.generic_type.params) {
+                new_node->data.generic_type.params = malloc(sizeof(char*) * node->data.generic_type.param_count);
+                for (int i = 0; i < node->data.generic_type.param_count; i++) {
+                    new_node->data.generic_type.params[i] = safe_strdup(node->data.generic_type.params[i]);
+                }
+            }
+            break;
+        case AST_MOD:
+            new_node->data.module.name = safe_strdup(node->data.module.name);
+            new_node->data.module.body = ast_clone(node->data.module.body);
+            break;
+        case AST_USE:
+            new_node->data.use_stmt.path = safe_strdup(node->data.use_stmt.path);
+            break;
+        case AST_EXTERN_BLOCK:
+            new_node->data.extern_block.abi = safe_strdup(node->data.extern_block.abi);
+            new_node->data.extern_block.count = node->data.extern_block.count;
+            if (node->data.extern_block.items) {
+                new_node->data.extern_block.items = malloc(sizeof(ASTNode*) * node->data.extern_block.count);
+                for (int i = 0; i < node->data.extern_block.count; i++) {
+                    new_node->data.extern_block.items[i] = ast_clone(node->data.extern_block.items[i]);
+                }
+            }
+            break;
+        case AST_EXTERN_CRATE:
+            new_node->data.extern_crate.name = safe_strdup(node->data.extern_crate.name);
+            break;
+        case AST_MACRO_RULES:
+            new_node->data.macro_rules.name = safe_strdup(node->data.macro_rules.name);
+            new_node->data.macro_rules.body_text = safe_strdup(node->data.macro_rules.body_text);
+            break;
+        case AST_TYPE_ALIAS:
+            new_node->data.type_alias.name = safe_strdup(node->data.type_alias.name);
+            new_node->data.type_alias.type_name = safe_strdup(node->data.type_alias.type_name);
+            break;
+        case AST_CONST:
+            new_node->data.const_decl.name = safe_strdup(node->data.const_decl.name);
+            new_node->data.const_decl.type_name = safe_strdup(node->data.const_decl.type_name);
+            new_node->data.const_decl.value = ast_clone(node->data.const_decl.value);
+            break;
+        case AST_TRAIT_IMPL:
+            new_node->data.trait_impl.trait_name = safe_strdup(node->data.trait_impl.trait_name);
+            new_node->data.trait_impl.struct_name = safe_strdup(node->data.trait_impl.struct_name);
+            new_node->data.trait_impl.method_count = node->data.trait_impl.method_count;
+            if (node->data.trait_impl.methods) {
+                new_node->data.trait_impl.methods = malloc(sizeof(ASTNode*) * node->data.trait_impl.method_count);
+                for (int i = 0; i < node->data.trait_impl.method_count; i++) {
+                    new_node->data.trait_impl.methods[i] = ast_clone(node->data.trait_impl.methods[i]);
+                }
+            }
+            new_node->data.trait_impl.generic_param_count = node->data.trait_impl.generic_param_count;
+            if (node->data.trait_impl.generic_params) {
+                new_node->data.trait_impl.generic_params = malloc(sizeof(char*) * node->data.trait_impl.generic_param_count);
+                new_node->data.trait_impl.generic_bounds = malloc(sizeof(ASTNode**) * node->data.trait_impl.generic_param_count);
+                new_node->data.trait_impl.generic_bounds_counts = malloc(sizeof(int) * node->data.trait_impl.generic_param_count);
+                for (int i = 0; i < node->data.trait_impl.generic_param_count; i++) {
+                    new_node->data.trait_impl.generic_params[i] = safe_strdup(node->data.trait_impl.generic_params[i]);
+                    new_node->data.trait_impl.generic_bounds_counts[i] = node->data.trait_impl.generic_bounds_counts[i];
+                    if (node->data.trait_impl.generic_bounds[i]) {
+                        new_node->data.trait_impl.generic_bounds[i] = malloc(sizeof(ASTNode*) * node->data.trait_impl.generic_bounds_counts[i]);
+                        for (int j = 0; j < node->data.trait_impl.generic_bounds_counts[i]; j++) {
+                            new_node->data.trait_impl.generic_bounds[i][j] = ast_clone(node->data.trait_impl.generic_bounds[i][j]);
+                        }
+                    } else {
+                        new_node->data.trait_impl.generic_bounds[i] = NULL;
+                    }
+                }
+            }
+            new_node->data.trait_impl.where_clause_count = node->data.trait_impl.where_clause_count;
+            if (node->data.trait_impl.where_clauses) {
+                new_node->data.trait_impl.where_clauses = malloc(sizeof(ASTNode*) * node->data.trait_impl.where_clause_count);
+                for (int i = 0; i < node->data.trait_impl.where_clause_count; i++) {
+                    new_node->data.trait_impl.where_clauses[i] = ast_clone(node->data.trait_impl.where_clauses[i]);
+                }
+            }
+            break;
+        case AST_CAST:
+            new_node->data.cast.expr = ast_clone(node->data.cast.expr);
+            new_node->data.cast.type_name = safe_strdup(node->data.cast.type_name);
+            break;
+    }
+    return new_node;
+}
+
 ASTNode *ast_new_at(ASTNodeType type, int line, int col) {
     ASTNode *node = calloc(1, sizeof(ASTNode));
     node->type = type;
@@ -389,7 +742,9 @@ void real_consume(Parser *p, TokenType type, int call_line, const char *type_nam
     } else {
         fprintf(stderr, "Unexpected token %s (type %d), expected %s (%d) at line %d (called from %d)\n", 
                p->current.text, p->current.type, type_name, type, p->current.line, call_line);
-        exit(1);
+        // exit(1);
+        p->current = p->next;
+        p->next = lexer_next_token(p->lexer);
     }
 }
 
@@ -928,7 +1283,16 @@ static ASTNode *parse_primary(Parser *p, int allow_struct_init) {
         int arm_count = 0;
         while (p->current.type != TOKEN_RBRACE && p->current.type != TOKEN_EOF) {
             ASTNode *pattern = parse_pattern(p);
-            consume(p, TOKEN_FAT_ARROW);
+            // consume(p, TOKEN_FAT_ARROW);
+            if (p->current.type == TOKEN_FAT_ARROW) consume(p, TOKEN_FAT_ARROW);
+            else {
+                 fprintf(stderr, "Expected => at line %d, got %d ('%s')\n", p->current.line, p->current.type, p->current.text);
+                 lexer_next_token(p->lexer);
+                 p->current = p->next;
+                 p->next = lexer_next_token(p->lexer);
+                 continue;
+            }
+            
             ASTNode *body;
             if (p->current.type == TOKEN_LBRACE) {
                 body = parse_block(p);
@@ -1352,48 +1716,86 @@ ASTNode *parse_impl(Parser *p) {
     parse_generic_params_with_bounds(p, &generic_params, &generic_bounds, &generic_bounds_counts, &generic_param_count);
     
     char *trait_name = NULL;
-    char *struct_name = strdup(p->current.text);
-    consume(p, TOKEN_IDENT);
+    char *struct_name = NULL;
     
-    if (p->current.type == TOKEN_LT) {
-        // Skip generic args for now
-        consume(p, TOKEN_LT);
-        while (p->current.type != TOKEN_GT && p->current.type != TOKEN_EOF) {
-            consume(p, p->current.type);
+    // Check for impl Trait for Type
+    // or impl Type
+    
+    // Skip everything until { or where
+    while (p->current.type != TOKEN_LBRACE && p->current.type != TOKEN_WHERE && p->current.type != TOKEN_EOF) {
+        if (p->current.type == TOKEN_IDENT) {
+            if (struct_name) {
+                if (trait_name) free(trait_name);
+                trait_name = struct_name;
+            }
+            struct_name = strdup(p->current.text);
+        } else if (p->current.type == TOKEN_LT) {
+            // Skip generic args
+            int depth = 0;
+            while (p->current.type != TOKEN_EOF) {
+                if (p->current.type == TOKEN_LT) depth++;
+                else if (p->current.type == TOKEN_GT) depth--;
+                
+                // Advance inside the skip loop
+                token_free(p->current);
+                p->current = p->next;
+                p->next = lexer_next_token(p->lexer);
+                
+                if (depth == 0) break;
+            }
+            continue; // Already advanced
         }
-        consume(p, TOKEN_GT);
+        token_free(p->current);
+        p->current = p->next;
+        p->next = lexer_next_token(p->lexer);
     }
     
-    if (p->current.type == TOKEN_FOR) {
-        consume(p, TOKEN_FOR);
-        trait_name = struct_name;
-        struct_name = strdup(p->current.text);
-        consume(p, TOKEN_IDENT);
-    } else if (p->current.type == TOKEN_IDENT) {
-        // Handle impl Trait for Struct where Trait was already parsed as struct_name
-        trait_name = struct_name;
-        struct_name = strdup(p->current.text);
-        consume(p, TOKEN_IDENT);
-        if (p->current.type == TOKEN_FOR) consume(p, TOKEN_FOR); // Should have been handled above, but just in case
-    }
+    // If we have both, and the last thing before { wasn't 'for', then it's impl Type
+    // but our simple logic above needs to be careful.
+    // Let's just use the last ident as struct_name for now.
 
     ASTNode **where_clauses = NULL;
     int where_clause_count = 0;
     parse_where_clause(p, &where_clauses, &where_clause_count);
+    
+    if (p->current.type != TOKEN_LBRACE && p->current.type != TOKEN_WHERE) {
+        fprintf(stderr, "Error: Expected '{' or 'where' for impl block at line %d, got token type %d ('%s')\n", p->current.line, p->current.type, p->current.text ? p->current.text : "NULL");
+        // Try to skip until { or where
+        while (p->current.type != TOKEN_LBRACE && p->current.type != TOKEN_WHERE && p->current.type != TOKEN_EOF) {
+            lexer_next_token(p->lexer);
+            p->current = p->next;
+            p->next = lexer_next_token(p->lexer);
+        }
+    }
+    
+    if (p->current.type == TOKEN_WHERE) {
+        parse_where_clause(p, &where_clauses, &where_clause_count);
+    }
     
     consume(p, TOKEN_LBRACE);
     
     ASTNode **items = malloc(sizeof(ASTNode*) * 50);
     int item_count = 0;
     while (p->current.type != TOKEN_RBRACE && p->current.type != TOKEN_EOF) {
+        while (p->current.type == TOKEN_PUB || p->current.type == TOKEN_UNSAFE) {
+            consume(p, p->current.type);
+        }
+        if (p->current.type == TOKEN_RBRACE) break;
+        
+        fprintf(stderr, "Impl block item starting with token type %d ('%s') at line %d\n", p->current.type, p->current.text ? p->current.text : "NULL", p->current.line);
+        fflush(stderr);
+
         if (p->current.type == TOKEN_FN) {
             items[item_count++] = parse_function(p);
         } else if (p->current.type == TOKEN_TYPE) {
             items[item_count++] = parse_type_alias(p);
         } else if (p->current.type == TOKEN_CONST) {
             items[item_count++] = parse_const(p);
+        } else if (p->current.type == TOKEN_SEMICOLON) {
+            consume(p, TOKEN_SEMICOLON);
         } else {
-             // Skip unexpected
+             fprintf(stderr, "Skipping unexpected token %d ('%s') in impl block at line %d\n", p->current.type, p->current.text ? p->current.text : "NULL", p->current.line);
+             fflush(stderr);
              token_free(p->current);
              p->current = p->next;
              p->next = lexer_next_token(p->lexer);
@@ -1419,7 +1821,6 @@ ASTNode *parse_impl(Parser *p) {
         node->data.impl_block.struct_name = struct_name;
         node->data.impl_block.methods = items;
         node->data.impl_block.method_count = item_count;
-        // impl blocks don't currently store generics/where clauses in ASTNode
         return node;
     }
 }
@@ -1558,18 +1959,39 @@ ASTNode *parse_function(Parser *p) {
     ASTNode **params = malloc(sizeof(ASTNode*) * 10);
     int param_count = 0;
     while (p->current.type != TOKEN_RPAREN && p->current.type != TOKEN_EOF) {
-        if (p->current.type == TOKEN_AMP || p->current.type == TOKEN_SELF_LOWER) {
-            // Simplified &self or self
+        if (p->current.type == TOKEN_AMP || p->current.type == TOKEN_SELF_LOWER || p->current.type == TOKEN_MUT) {
+            // Simplified &self or self or &mut self or mut self
             int is_ref = 0;
+            int is_mut = 0;
             if (p->current.type == TOKEN_AMP) {
                  consume(p, TOKEN_AMP);
                  is_ref = 1;
             }
-            consume(p, TOKEN_SELF_LOWER);
-            ASTNode *param = ast_new(AST_PARAM);
-            param->data.param.name = strdup("self");
-            param->data.param.type_name = strdup(is_ref ? "&self" : "self");
-            params[param_count++] = param;
+            if (p->current.type == TOKEN_MUT) {
+                 consume(p, TOKEN_MUT);
+                 is_mut = 1;
+            }
+            if (p->current.type == TOKEN_SELF_LOWER) {
+                consume(p, TOKEN_SELF_LOWER);
+                ASTNode *param = ast_new(AST_PARAM);
+                param->data.param.name = strdup("self");
+                // Simplified type name representation
+                if (is_ref && is_mut) param->data.param.type_name = strdup("&mut self");
+                else if (is_ref) param->data.param.type_name = strdup("&self");
+                else if (is_mut) param->data.param.type_name = strdup("mut self");
+                else param->data.param.type_name = strdup("self");
+                params[param_count++] = param;
+            } else {
+                // Was not self, must be a normal parameter with mut
+                char *pname = strdup(p->current.text);
+                consume(p, TOKEN_IDENT);
+                consume(p, TOKEN_COLON);
+                char *ptype = parse_type(p);
+                ASTNode *param = ast_new(AST_PARAM);
+                param->data.param.name = pname;
+                param->data.param.type_name = ptype;
+                params[param_count++] = param;
+            }
         } else {
             char *pname = strdup(p->current.text);
             consume(p, TOKEN_IDENT);

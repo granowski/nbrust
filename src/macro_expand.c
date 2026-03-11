@@ -23,6 +23,42 @@ static void add_macro(const char *name, const char *body) {
 static void expand_node(ASTNode **node_ptr);
 
 static ASTNode* expand_macro_call(ASTNode *node) {
+    if (strcmp(node->data.macro_call.name, "vec") == 0) {
+        // Special case: vec![1, 2, 3] -> { let mut v = Vec::new(); v.push(1); v.push(2); v.push(3); v }
+        ASTNode *block = ast_new(AST_BLOCK);
+        ASTNode **stmts = malloc(sizeof(ASTNode*) * (node->data.macro_call.arg_count + 2));
+        int count = 0;
+        
+        // let mut v = Vec::new();
+        ASTNode *v_decl = ast_new(AST_VAR_DECL);
+        v_decl->data.var_decl.name = strdup("v");
+        v_decl->data.var_decl.is_mutable = 1;
+        ASTNode *v_init = ast_new(AST_CALL);
+        v_init->data.call.name = strdup("Vec::new");
+        v_decl->data.var_decl.init = v_init;
+        stmts[count++] = v_decl;
+        
+        for (int i = 0; i < node->data.macro_call.arg_count; i++) {
+            ASTNode *push = ast_new(AST_METHOD_CALL);
+            push->data.method_call.receiver = ast_new(AST_IDENT);
+            push->data.method_call.receiver->data.ident.name = strdup("v");
+            push->data.method_call.method_name = strdup("push");
+            push->data.method_call.args = malloc(sizeof(ASTNode*));
+            push->data.method_call.args[0] = ast_clone(node->data.macro_call.args[i]);
+            push->data.method_call.arg_count = 1;
+            stmts[count++] = push;
+        }
+        
+        // v
+        ASTNode *v_ident = ast_new(AST_IDENT);
+        v_ident->data.ident.name = strdup("v");
+        stmts[count++] = v_ident;
+        
+        block->data.block.statements = stmts;
+        block->data.block.count = count;
+        return block;
+    }
+
     MacroDefinition *m = macro_list;
     while (m) {
         if (strcmp(m->name, node->data.macro_call.name) == 0) {

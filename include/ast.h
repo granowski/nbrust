@@ -243,5 +243,6 @@ ASTNode *ast_new_at(ASTNodeType type, int line, int col);
 ASTNode *ast_new_old(ASTNodeType type);
 #define ast_new(type) ast_new_old(type)
 void ast_free(ASTNode *node);
+ASTNode *ast_clone(ASTNode *node);
 
 #endif

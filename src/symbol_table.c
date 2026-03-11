@@ -58,11 +58,27 @@ Symbol *symbol_table_lookup(SymbolTable *table, const char *name) {
 }
 
 Symbol *symbol_table_lookup_path(SymbolTable *table, const char *path) {
+    if (strcmp(path, "self") == 0) {
+        // Find current scope? symbol_table_lookup handles it usually, but path might be self::foo
+    }
+    
     char *path_copy = strdup(path);
-    char *token = strtok(path_copy, "::");
     SymbolTable *current_table = table;
     Symbol *result = NULL;
 
+    char *start = path_copy;
+    if (strncmp(start, "crate::", 7) == 0) {
+        // Go to root
+        while (current_table->parent) current_table = current_table->parent;
+        start += 7;
+    } else if (strncmp(start, "super::", 7) == 0) {
+        if (current_table->parent) current_table = current_table->parent;
+        start += 7;
+    } else if (strncmp(start, "self::", 6) == 0) {
+        start += 6;
+    }
+
+    char *token = strtok(start, "::");
     while (token != NULL) {
         Symbol *s = current_table->symbols;
         result = NULL;
