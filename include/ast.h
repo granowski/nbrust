@@ -24,6 +24,7 @@ typedef enum {
     AST_STRING_LITERAL,
     AST_UNOP,
     AST_ENUM_DECL,
+    AST_ENUM_VARIANT,
     AST_MATCH,
     AST_MATCH_ARM,
     AST_TRAIT,
@@ -45,6 +46,8 @@ typedef struct ASTNode {
             int param_count;
             char *return_type;
             struct ASTNode *body;
+            char **generic_params;
+            int generic_param_count;
         } func;
         struct {
             char *name;
@@ -94,6 +97,8 @@ typedef struct ASTNode {
             char *name;
             struct ASTNode **fields;
             int field_count;
+            char **generic_params;
+            int generic_param_count;
         } struct_decl;
         struct {
             char *struct_name;
@@ -135,7 +140,15 @@ typedef struct ASTNode {
             char *name;
             struct ASTNode **variants;
             int variant_count;
+            char **generic_params;
+            int generic_param_count;
         } enum_decl;
+        struct {
+            char *name;
+            ASTNodeType variant_type; // AST_PARAM (unit), AST_CALL (tuple), AST_STRUCT_DECL (struct)
+            struct ASTNode **fields;
+            int field_count;
+        } enum_variant;
         struct {
             struct ASTNode *expr;
             struct ASTNode **arms;

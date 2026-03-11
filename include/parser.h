@@ -18,6 +18,8 @@ ASTNode *parse_function(Parser *p);
 ASTNode *parse_struct(Parser *p);
 ASTNode *parse_impl(Parser *p);
 ASTNode *parse_enum(Parser *p);
+ASTNode *parse_statement(Parser *p);
+ASTNode *parse_expression(Parser *p);
 ASTNode *parse_trait(Parser *p);
 ASTNode *parse_mod(Parser *p);
 ASTNode *parse_use(Parser *p);

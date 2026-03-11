@@ -126,6 +126,19 @@ void ast_free(ASTNode *node) {
                 ast_free(node->data.enum_decl.variants[i]);
             }
             if (node->data.enum_decl.variants) free(node->data.enum_decl.variants);
+            if (node->data.enum_decl.generic_params) {
+                for (int i = 0; i < node->data.enum_decl.generic_param_count; i++) {
+                    free(node->data.enum_decl.generic_params[i]);
+                }
+                free(node->data.enum_decl.generic_params);
+            }
+            break;
+        case AST_ENUM_VARIANT:
+            free(node->data.enum_variant.name);
+            for (int i = 0; i < node->data.enum_variant.field_count; i++) {
+                ast_free(node->data.enum_variant.fields[i]);
+            }
+            if (node->data.enum_variant.fields) free(node->data.enum_variant.fields);
             break;
         case AST_MATCH:
             ast_free(node->data.match_stmt.expr);
@@ -184,9 +197,9 @@ void parser_init(Parser *p, Lexer *l) {
 }
 
 static char *parse_type(Parser *p);
-static ASTNode *parse_expression(Parser *p);
+ASTNode *parse_expression(Parser *p);
 static ASTNode *parse_expression_no_struct(Parser *p);
-static ASTNode *parse_statement(Parser *p);
+ASTNode *parse_statement(Parser *p);
 static ASTNode *parse_pattern(Parser *p);
 
 void real_consume(Parser *p, TokenType type, int call_line, const char *type_name) {
@@ -329,24 +342,7 @@ static ASTNode *parse_pattern(Parser *p) {
         ASTNode **args = malloc(sizeof(ASTNode*) * 10);
         int arg_count = 0;
         while (p->current.type != TOKEN_RPAREN && p->current.type != TOKEN_EOF) {
-            // Check for binder or nested pattern
-            if (p->current.type == TOKEN_IDENT) {
-                ASTNode *binder = ast_new(AST_IDENT);
-                binder->data.ident.name = strdup(p->current.text);
-                consume(p, TOKEN_IDENT);
-                args[arg_count++] = binder;
-            } else if (p->current.type == TOKEN_UNDERSCORE) {
-                ASTNode *binder = ast_new(AST_IDENT);
-                binder->data.ident.name = strdup("_");
-                consume(p, TOKEN_UNDERSCORE);
-                args[arg_count++] = binder;
-            } else if (p->current.type == TOKEN_LPAREN) {
-                // Support one level of nesting for now
-                args[arg_count++] = parse_pattern(p);
-            } else {
-                break;
-            }
-            
+            args[arg_count++] = parse_pattern(p);
             if (p->current.type == TOKEN_COMMA) {
                 consume(p, TOKEN_COMMA);
             }
@@ -357,6 +353,36 @@ static ASTNode *parse_pattern(Parser *p) {
         node->data.call.args = args;
         node->data.call.arg_count = arg_count;
         return node;
+    } else if (p->current.type == TOKEN_LBRACE) {
+        consume(p, TOKEN_LBRACE);
+        ASTNode **fields = malloc(sizeof(ASTNode*) * 10);
+        int field_count = 0;
+        while (p->current.type != TOKEN_RBRACE && p->current.type != TOKEN_EOF) {
+            char *fname = strdup(p->current.text);
+            consume(p, TOKEN_IDENT);
+            ASTNode *val_pattern = NULL;
+            if (p->current.type == TOKEN_COLON) {
+                consume(p, TOKEN_COLON);
+                val_pattern = parse_pattern(p);
+            } else {
+                // Shorthand: field name is also the binder
+                val_pattern = ast_new(AST_IDENT);
+                val_pattern->data.ident.name = strdup(fname);
+            }
+            ASTNode *field_init = ast_new(AST_FIELD_INIT);
+            field_init->data.field_init.name = fname;
+            field_init->data.field_init.value = val_pattern;
+            fields[field_count++] = field_init;
+            if (p->current.type == TOKEN_COMMA) {
+                consume(p, TOKEN_COMMA);
+            }
+        }
+        consume(p, TOKEN_RBRACE);
+        ASTNode *node = ast_new(AST_STRUCT_INIT);
+        node->data.struct_init.struct_name = name;
+        node->data.struct_init.fields = fields;
+        node->data.struct_init.field_count = field_count;
+        return node;
     }
     
     ASTNode *node = ast_new(AST_IDENT);
@@ -364,7 +390,7 @@ static ASTNode *parse_pattern(Parser *p) {
     return node;
 }
 
-static ASTNode *parse_expression(Parser *p);
+ASTNode *parse_expression(Parser *p);
 
 static ASTNode *parse_primary(Parser *p, int allow_struct_init) {
     if (p->current.type == TOKEN_STAR || p->current.type == TOKEN_AMP) {
@@ -682,7 +708,7 @@ static ASTNode *parse_expression_precedence(Parser *p, int min_precedence, int a
 
 static ASTNode *parse_expression_precedence(Parser *p, int min_precedence, int allow_struct_init);
 
-static ASTNode *parse_expression(Parser *p) {
+ASTNode *parse_expression(Parser *p) {
     return parse_expression_precedence(p, 1, 1);
 }
 
@@ -692,19 +718,18 @@ static ASTNode *parse_expression_no_struct(Parser *p) {
 
 static ASTNode *parse_primary(Parser *p, int allow_struct_init);
 
-static ASTNode *parse_statement(Parser *p) {
+ASTNode *parse_statement(Parser *p) {
     if (p->current.type == TOKEN_UNSAFE) {
         consume(p, TOKEN_UNSAFE);
         return parse_statement(p);
     }
-    printf("// parse_statement: current is %s (%d)\n", p->current.text, p->current.type);
     if (p->current.type == TOKEN_LET) {
         consume(p, TOKEN_LET);
         if (p->current.type == TOKEN_MUT) {
             consume(p, TOKEN_MUT);
         }
-        char *name = strdup(p->current.text);
-        consume(p, TOKEN_IDENT);
+        
+        ASTNode *pattern = parse_pattern(p);
         char *type_name = NULL;
         if (p->current.type == TOKEN_COLON) {
             consume(p, TOKEN_COLON);
@@ -716,11 +741,26 @@ static ASTNode *parse_statement(Parser *p) {
             init = parse_expression(p);
         }
         consume(p, TOKEN_SEMICOLON);
-        ASTNode *node = ast_new(AST_VAR_DECL);
-        node->data.var_decl.name = name;
-        node->data.var_decl.type_name = type_name;
-        node->data.var_decl.init = init;
-        return node;
+        
+        if (pattern->type == AST_IDENT) {
+            ASTNode *node = ast_new(AST_VAR_DECL);
+            node->data.var_decl.name = pattern->data.ident.name;
+            node->data.var_decl.type_name = type_name;
+            node->data.var_decl.init = init;
+            // Note: pattern->data.ident.name is now owned by var_decl
+            free(pattern);
+            return node;
+        } else {
+            // General pattern in let: let (x, y) = ... or let Message::Write(text) = ...
+            // This requires more complex codegen (like a match with one arm)
+            // For now, let's just wrap it in a special node or reuse AST_VAR_DECL with a pattern
+            ASTNode *node = ast_new(AST_VAR_DECL);
+            node->data.var_decl.name = strdup("_pat"); // Dummy name
+            node->data.var_decl.type_name = type_name;
+            node->data.var_decl.init = init;
+            // We'd need to extend AST_VAR_DECL to store the pattern
+            return node;
+        }
     } else if (p->current.type == TOKEN_IF) {
         consume(p, TOKEN_IF);
         if (p->current.type == TOKEN_LET) {
@@ -918,13 +958,21 @@ ASTNode *parse_struct(Parser *p) {
     char *name = strdup(p->current.text);
     consume(p, TOKEN_IDENT);
     
+    ASTNode *node = ast_new(AST_STRUCT_DECL);
+    node->data.struct_decl.name = name;
+
     if (p->current.type == TOKEN_LT) {
         consume(p, TOKEN_LT);
+        char **generic_params = malloc(sizeof(char*) * 10);
+        int generic_param_count = 0;
         while (p->current.type != TOKEN_GT && p->current.type != TOKEN_EOF) {
+            generic_params[generic_param_count++] = strdup(p->current.text);
             consume(p, TOKEN_IDENT);
             if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
         }
         consume(p, TOKEN_GT);
+        node->data.struct_decl.generic_params = generic_params;
+        node->data.struct_decl.generic_param_count = generic_param_count;
     }
     
     consume(p, TOKEN_LBRACE);
@@ -948,8 +996,6 @@ ASTNode *parse_struct(Parser *p) {
     }
     consume(p, TOKEN_RBRACE);
     
-    ASTNode *node = ast_new(AST_STRUCT_DECL);
-    node->data.struct_decl.name = name;
     node->data.struct_decl.fields = fields;
     node->data.struct_decl.field_count = field_count;
     return node;
@@ -998,13 +1044,21 @@ ASTNode *parse_enum(Parser *p) {
     char *name = strdup(p->current.text);
     consume(p, TOKEN_IDENT);
     
+    ASTNode *node = ast_new(AST_ENUM_DECL);
+    node->data.enum_decl.name = name;
+
     if (p->current.type == TOKEN_LT) {
         consume(p, TOKEN_LT);
+        char **generic_params = malloc(sizeof(char*) * 10);
+        int generic_param_count = 0;
         while (p->current.type != TOKEN_GT && p->current.type != TOKEN_EOF) {
+            generic_params[generic_param_count++] = strdup(p->current.text);
             consume(p, TOKEN_IDENT);
             if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
         }
         consume(p, TOKEN_GT);
+        node->data.enum_decl.generic_params = generic_params;
+        node->data.enum_decl.generic_param_count = generic_param_count;
     }
     
     consume(p, TOKEN_LBRACE);
@@ -1015,14 +1069,49 @@ ASTNode *parse_enum(Parser *p) {
         char *vname = strdup(p->current.text);
         consume(p, TOKEN_IDENT);
         
-        ASTNode *variant = ast_new(AST_PARAM);
-        variant->data.param.name = vname;
-        variant->data.param.type_name = NULL;
+        ASTNode *variant = ast_new(AST_ENUM_VARIANT);
+        variant->data.enum_variant.name = vname;
         
         if (p->current.type == TOKEN_LPAREN) {
+            // Tuple variant
             consume(p, TOKEN_LPAREN);
-            variant->data.param.type_name = parse_type(p);
+            variant->data.enum_variant.variant_type = AST_CALL;
+            ASTNode **fields = malloc(sizeof(ASTNode*) * 10);
+            int field_count = 0;
+            while (p->current.type != TOKEN_RPAREN && p->current.type != TOKEN_EOF) {
+                ASTNode *field = ast_new(AST_PARAM);
+                field->data.param.type_name = parse_type(p);
+                fields[field_count++] = field;
+                if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
+            }
             consume(p, TOKEN_RPAREN);
+            variant->data.enum_variant.fields = fields;
+            variant->data.enum_variant.field_count = field_count;
+        } else if (p->current.type == TOKEN_LBRACE) {
+            // Struct variant
+            consume(p, TOKEN_LBRACE);
+            variant->data.enum_variant.variant_type = AST_STRUCT_DECL;
+            ASTNode **fields = malloc(sizeof(ASTNode*) * 20);
+            int field_count = 0;
+            while (p->current.type != TOKEN_RBRACE && p->current.type != TOKEN_EOF) {
+                char *fname = strdup(p->current.text);
+                consume(p, TOKEN_IDENT);
+                consume(p, TOKEN_COLON);
+                char *ftype = parse_type(p);
+                ASTNode *field = ast_new(AST_PARAM);
+                field->data.param.name = fname;
+                field->data.param.type_name = ftype;
+                fields[field_count++] = field;
+                if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
+            }
+            consume(p, TOKEN_RBRACE);
+            variant->data.enum_variant.fields = fields;
+            variant->data.enum_variant.field_count = field_count;
+        } else {
+            // Unit variant
+            variant->data.enum_variant.variant_type = AST_PARAM;
+            variant->data.enum_variant.fields = NULL;
+            variant->data.enum_variant.field_count = 0;
         }
         
         variants[variant_count++] = variant;
@@ -1030,8 +1119,6 @@ ASTNode *parse_enum(Parser *p) {
     }
     consume(p, TOKEN_RBRACE);
     
-    ASTNode *node = ast_new(AST_ENUM_DECL);
-    node->data.enum_decl.name = name;
     node->data.enum_decl.variants = variants;
     node->data.enum_decl.variant_count = variant_count;
     return node;
@@ -1086,13 +1173,21 @@ ASTNode *parse_function(Parser *p) {
     char *name = strdup(p->current.text);
     consume(p, TOKEN_IDENT);
     
+    ASTNode *node = ast_new(AST_FUNC);
+    node->data.func.name = name;
+
     if (p->current.type == TOKEN_LT) {
         consume(p, TOKEN_LT);
+        char **generic_params = malloc(sizeof(char*) * 10);
+        int generic_param_count = 0;
         while (p->current.type != TOKEN_GT && p->current.type != TOKEN_EOF) {
+            generic_params[generic_param_count++] = strdup(p->current.text);
             consume(p, TOKEN_IDENT);
             if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
         }
         consume(p, TOKEN_GT);
+        node->data.func.generic_params = generic_params;
+        node->data.func.generic_param_count = generic_param_count;
     }
     
     if (p->current.type == TOKEN_LT) {
@@ -1145,8 +1240,6 @@ ASTNode *parse_function(Parser *p) {
         return_type = parse_type(p);
     }
     
-    ASTNode *node = ast_new(AST_FUNC);
-    node->data.func.name = name;
     node->data.func.params = params;
     node->data.func.param_count = param_count;
     node->data.func.return_type = return_type;

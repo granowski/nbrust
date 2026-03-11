@@ -1,7 +1,7 @@
 CC=	cc
 CFLAGS=	-O2 -Wall -Iinclude -Icargo
 SRCS=	src/main.c src/lexer.c src/parser.c src/codegen.c src/codegen_arm64.c src/codegen_armv6.c \
-	src/types.c src/symbol_table.c src/type_checker.c src/macro_expand.c src/borrow_checker.c
+	src/types.c src/symbol_table.c src/type_checker.c src/macro_expand.c src/borrow_checker.c src/monomorphization.c
 CARGO_SRCS=	cargo/main.c cargo/toml.c
 OBJDIR=	obj
 OBJS=	${SRCS:src/%.c=${OBJDIR}/%.o}

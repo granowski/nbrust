@@ -6,6 +6,7 @@
 #include "type_checker.h"
 #include "macro_expand.h"
 #include "borrow_checker.h"
+#include "monomorphization.h"
 
 #include <string.h>
 
@@ -125,7 +126,7 @@ static void process_file(const char *path, Target target) {
                 FILE *mf = fopen(mod_path, "r");
                 if (!mf) {
                     snprintf(mod_path, sizeof(mod_path), "%s/%s/mod.rs", dir, ast->data.module.name);
-                mf = fopen(mod_path, "r");
+                    mf = fopen(mod_path, "r");
                 }
                 
                 if (mf) {
@@ -181,15 +182,32 @@ static void process_file(const char *path, Target target) {
         } else if (p.current.type == TOKEN_SEMICOLON) {
             consume(&p, TOKEN_SEMICOLON);
             continue;
+        } else if (p.current.type == TOKEN_IDENT || p.current.type == TOKEN_LET || p.current.type == TOKEN_MATCH || p.current.type == TOKEN_IF || p.current.type == TOKEN_LBRACE) {
+            // These are probably part of a function or some other top-level item that failed to parse correctly
+            // or we are inside a context that allows statements.
+            // For now, let's try to parse it as a statement if we are not at top level, 
+            // but the current structure of main.c assumes top-level items.
+            ast = parse_statement(&p);
         } else {
-            token_free(p.current);
+            // Skip unknown tokens at top level
+            lexer_next_token(p.lexer); 
             p.current = p.next;
             p.next = lexer_next_token(p.lexer);
             continue;
         }
         
         if (ast) {
+            int is_generic = (ast->type == AST_FUNC && ast->data.func.generic_param_count > 0) ||
+                             (ast->type == AST_STRUCT_DECL && ast->data.struct_decl.generic_param_count > 0) ||
+                             (ast->type == AST_ENUM_DECL && ast->data.enum_decl.generic_param_count > 0);
+
+            if (is_generic) {
+                monomorphization_register(ast);
+            }
+            
             macro_expand_run(ast);
+            monomorphization_run(ast);
+            
             // type_checker_run(ast);
             // borrow_checker_run(ast);
             
@@ -199,7 +217,9 @@ static void process_file(const char *path, Target target) {
                  printf("#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n");
                  once = 1;
             }
-            codegen_generate(ast, stdout, target, current_crate_name);
+            if (!is_generic) {
+                codegen_generate(ast, stdout, target, current_crate_name);
+            }
             ast_free(ast);
         }
     }
