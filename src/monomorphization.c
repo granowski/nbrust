@@ -79,7 +79,11 @@ static ASTNode *specialize_node(ASTNode *node, char **params, char **args, int c
             }
             new_node->data.func.body = specialize_node(node->data.func.body, params, args, count);
             new_node->data.func.generic_params = NULL;
+            new_node->data.func.generic_bounds = NULL;
+            new_node->data.func.generic_bounds_counts = NULL;
             new_node->data.func.generic_param_count = 0;
+            new_node->data.func.where_clauses = NULL;
+            new_node->data.func.where_clause_count = 0;
             break;
         case AST_PARAM:
             new_node->data.param.name = strdup(node->data.param.name);
@@ -98,7 +102,25 @@ static ASTNode *specialize_node(ASTNode *node, char **params, char **args, int c
             new_node->data.binop.left = specialize_node(node->data.binop.left, params, args, count);
             new_node->data.binop.right = specialize_node(node->data.binop.right, params, args, count);
             break;
+        case AST_FOR_STMT:
+            new_node->data.for_loop.var_name = strdup(node->data.for_loop.var_name);
+            new_node->data.for_loop.iterable = specialize_node(node->data.for_loop.iterable, params, args, count);
+            new_node->data.for_loop.body = specialize_node(node->data.for_loop.body, params, args, count);
+            break;
+        case AST_MATCH:
+            new_node->data.match_stmt.expr = specialize_node(node->data.match_stmt.expr, params, args, count);
+            new_node->data.match_stmt.arm_count = node->data.match_stmt.arm_count;
+            new_node->data.match_stmt.arms = malloc(sizeof(ASTNode*) * node->data.match_stmt.arm_count);
+            for (int i = 0; i < node->data.match_stmt.arm_count; i++) {
+                new_node->data.match_stmt.arms[i] = specialize_node(node->data.match_stmt.arms[i], params, args, count);
+            }
+            break;
+        case AST_MATCH_ARM:
+            new_node->data.match_arm.pattern = specialize_node(node->data.match_arm.pattern, params, args, count);
+            new_node->data.match_arm.body = specialize_node(node->data.match_arm.body, params, args, count);
+            break;
         case AST_BLOCK:
+            new_node->data.block.count = node->data.block.count;
             new_node->data.block.statements = malloc(sizeof(ASTNode*) * node->data.block.count);
             for (int i = 0; i < node->data.block.count; i++) {
                 new_node->data.block.statements[i] = specialize_node(node->data.block.statements[i], params, args, count);
@@ -112,7 +134,11 @@ static ASTNode *specialize_node(ASTNode *node, char **params, char **args, int c
                 new_node->data.enum_decl.variants[i] = specialize_node(node->data.enum_decl.variants[i], params, args, count);
             }
             new_node->data.enum_decl.generic_params = NULL;
+            new_node->data.enum_decl.generic_bounds = NULL;
+            new_node->data.enum_decl.generic_bounds_counts = NULL;
             new_node->data.enum_decl.generic_param_count = 0;
+            new_node->data.enum_decl.where_clauses = NULL;
+            new_node->data.enum_decl.where_clause_count = 0;
             break;
         case AST_ENUM_VARIANT:
             new_node->data.enum_variant.name = strdup(node->data.enum_variant.name);
@@ -129,7 +155,11 @@ static ASTNode *specialize_node(ASTNode *node, char **params, char **args, int c
                 new_node->data.struct_decl.fields[i] = specialize_node(node->data.struct_decl.fields[i], params, args, count);
             }
             new_node->data.struct_decl.generic_params = NULL;
+            new_node->data.struct_decl.generic_bounds = NULL;
+            new_node->data.struct_decl.generic_bounds_counts = NULL;
             new_node->data.struct_decl.generic_param_count = 0;
+            new_node->data.struct_decl.where_clauses = NULL;
+            new_node->data.struct_decl.where_clause_count = 0;
             break;
         // ... handle other types ...
         default: break;
@@ -211,6 +241,24 @@ static void walk_and_specialize(ASTNode *node) {
             for (int i = 0; i < node->data.call.arg_count; i++) walk_and_specialize(node->data.call.args[i]);
             break;
         }
+        case AST_WHILE:
+            walk_and_specialize(node->data.while_loop.condition);
+            walk_and_specialize(node->data.while_loop.body);
+            break;
+        case AST_FOR_STMT:
+            walk_and_specialize(node->data.for_loop.iterable);
+            walk_and_specialize(node->data.for_loop.body);
+            break;
+        case AST_MATCH:
+            walk_and_specialize(node->data.match_stmt.expr);
+            for (int i = 0; i < node->data.match_stmt.arm_count; i++) {
+                walk_and_specialize(node->data.match_stmt.arms[i]);
+            }
+            break;
+        case AST_MATCH_ARM:
+            walk_and_specialize(node->data.match_arm.pattern);
+            walk_and_specialize(node->data.match_arm.body);
+            break;
         case AST_BINOP:
             walk_and_specialize(node->data.binop.left);
             walk_and_specialize(node->data.binop.right);

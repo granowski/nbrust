@@ -46,6 +46,7 @@ typedef enum {
     TOKEN_MATCH,    // match
     TOKEN_TRAIT,    // trait
     TOKEN_FOR,      // for
+    TOKEN_IN,       // in
     TOKEN_FAT_ARROW, // =>
     TOKEN_SELF_LOWER, // self
     TOKEN_RETURN,   // return
@@ -63,6 +64,7 @@ typedef enum {
     TOKEN_SELF_UPPER, // Self
     TOKEN_TYPE,       // type
     TOKEN_CONST,      // const
+    TOKEN_WHERE,      // where
     TOKEN_AS,         // as
     TOKEN_DOLLAR,     // $
     TOKEN_LBRACKET,   // [

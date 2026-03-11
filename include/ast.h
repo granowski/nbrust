@@ -53,7 +53,11 @@ typedef struct ASTNode {
             char *return_type;
             struct ASTNode *body;
             char **generic_params;
+            struct ASTNode ***generic_bounds; // Array of arrays of trait bounds for each param
+            int *generic_bounds_counts;
             int generic_param_count;
+            struct ASTNode **where_clauses;
+            int where_clause_count;
         } func;
         struct {
             char *name;
@@ -63,6 +67,7 @@ typedef struct ASTNode {
             char *name;
             struct ASTNode *init;
             char *type_name;
+            int is_mutable;
         } var_decl;
         struct {
             char *value;
@@ -104,7 +109,11 @@ typedef struct ASTNode {
             struct ASTNode **fields;
             int field_count;
             char **generic_params;
+            struct ASTNode ***generic_bounds;
+            int *generic_bounds_counts;
             int generic_param_count;
+            struct ASTNode **where_clauses;
+            int where_clause_count;
         } struct_decl;
         struct {
             char *struct_name;
@@ -147,7 +156,11 @@ typedef struct ASTNode {
             struct ASTNode **variants;
             int variant_count;
             char **generic_params;
+            struct ASTNode ***generic_bounds;
+            int *generic_bounds_counts;
             int generic_param_count;
+            struct ASTNode **where_clauses;
+            int where_clause_count;
         } enum_decl;
         struct {
             char *name;
@@ -174,12 +187,23 @@ typedef struct ASTNode {
             char *struct_name;
             struct ASTNode **methods;
             int method_count;
+            char **generic_params;
+            struct ASTNode ***generic_bounds;
+            int *generic_bounds_counts;
+            int generic_param_count;
+            struct ASTNode **where_clauses;
+            int where_clause_count;
         } trait_impl;
         struct {
             char *base_name;
             char **params;
             int param_count;
         } generic_type;
+        struct {
+            char *var_name;
+            struct ASTNode *iterable;
+            struct ASTNode *body;
+        } for_loop;
         struct {
             char *name;
             struct ASTNode *body;

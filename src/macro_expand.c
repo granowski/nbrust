@@ -55,6 +55,42 @@ static ASTNode* expand_macro_call(ASTNode *node) {
                 new_node->data.call.arg_count = node->data.macro_call.arg_count;
                 return new_node;
             }
+            // Check for matches! macro
+            if (strcmp(m->name, "matches") == 0) {
+                // matches!($val, $pattern) => match $val { $pattern => true, _ => false }
+                if (node->data.macro_call.arg_count < 2) return node;
+                ASTNode *match_node = ast_new(AST_MATCH);
+                match_node->data.match_stmt.expr = node->data.macro_call.args[0];
+                match_node->data.match_stmt.arms = malloc(sizeof(ASTNode*) * 2);
+                match_node->data.match_stmt.arm_count = 2;
+                
+                ASTNode *arm1 = ast_new(AST_MATCH_ARM);
+                arm1->data.match_arm.pattern = node->data.macro_call.args[1];
+                ASTNode *true_node = ast_new(AST_BOOL_LITERAL);
+                true_node->data.bool_literal.value = 1;
+                arm1->data.match_arm.body = true_node;
+                
+                ASTNode *arm2 = ast_new(AST_MATCH_ARM);
+                ASTNode *underscore = ast_new(AST_IDENT);
+                underscore->data.ident.name = strdup("_");
+                arm2->data.match_arm.pattern = underscore;
+                ASTNode *false_node = ast_new(AST_BOOL_LITERAL);
+                false_node->data.bool_literal.value = 0;
+                arm2->data.match_arm.body = false_node;
+                
+                match_node->data.match_stmt.arms[0] = arm1;
+                match_node->data.match_stmt.arms[1] = arm2;
+                return match_node;
+            }
+            // Check for vec! macro
+            if (strcmp(m->name, "vec") == 0) {
+                // Simplified: vec![1, 2] => Vec::from_array([1, 2])
+                ASTNode *new_node = ast_new(AST_CALL);
+                new_node->data.call.name = strdup("Vec_from_array");
+                new_node->data.call.args = node->data.macro_call.args;
+                new_node->data.call.arg_count = node->data.macro_call.arg_count;
+                return new_node;
+            }
             break;
         }
         m = m->next;
@@ -85,6 +121,19 @@ static void expand_node(ASTNode **node_ptr) {
             break;
         case AST_WHILE:
             expand_node(&node->data.while_loop.body);
+            break;
+        case AST_FOR_STMT:
+            expand_node(&node->data.for_loop.iterable);
+            expand_node(&node->data.for_loop.body);
+            break;
+        case AST_MATCH:
+            expand_node(&node->data.match_stmt.expr);
+            for (int i = 0; i < node->data.match_stmt.arm_count; i++) {
+                expand_node(&node->data.match_stmt.arms[i]);
+            }
+            break;
+        case AST_MATCH_ARM:
+            expand_node(&node->data.match_arm.body);
             break;
         case AST_MOD:
             if (node->data.module.body) expand_node(&node->data.module.body);

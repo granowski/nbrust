@@ -105,6 +105,7 @@ Token lexer_next_token(Lexer *l) {
         else if (strcmp(text, "match") == 0) type = TOKEN_MATCH;
         else if (strcmp(text, "trait") == 0) type = TOKEN_TRAIT;
         else if (strcmp(text, "for") == 0) type = TOKEN_FOR;
+        else if (strcmp(text, "in") == 0) type = TOKEN_IN;
         else if (strcmp(text, "self") == 0) type = TOKEN_SELF_LOWER;
         else if (strcmp(text, "return") == 0) type = TOKEN_RETURN;
         else if (strcmp(text, "true") == 0) type = TOKEN_TRUE;
@@ -120,6 +121,7 @@ Token lexer_next_token(Lexer *l) {
         else if (strcmp(text, "Self") == 0) type = TOKEN_SELF_UPPER;
         else if (strcmp(text, "type") == 0) type = TOKEN_TYPE;
         else if (strcmp(text, "const") == 0) type = TOKEN_CONST;
+        else if (strcmp(text, "where") == 0) type = TOKEN_WHERE;
         else if (strcmp(text, "as") == 0) type = TOKEN_AS;
         else if (strcmp(text, "_") == 0) type = TOKEN_UNDERSCORE;
 

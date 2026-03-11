@@ -619,6 +619,18 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             fprintf(out, ") ");
             codegen_node(node->data.while_loop.body, out);
             break;
+        case AST_FOR_STMT:
+            fprintf(out, "    { auto _iter = ");
+            codegen_node(node->data.for_loop.iterable, out);
+            fprintf(out, ".into_iter();\n");
+            fprintf(out, "      while (1) {\n");
+            fprintf(out, "        auto _next = _iter.next();\n");
+            fprintf(out, "        if (_next.tag == 1) break; /* Option::None */\n");
+            fprintf(out, "        auto %s = _next.Some;\n", node->data.for_loop.var_name);
+            codegen_node(node->data.for_loop.body, out);
+            fprintf(out, "      }\n");
+            fprintf(out, "    }\n");
+            break;
         case AST_RETURN:
             fprintf(out, "    return ");
             if (node->data.ret_stmt.value) codegen_node(node->data.ret_stmt.value, out);

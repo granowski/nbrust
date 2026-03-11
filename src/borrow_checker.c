@@ -117,6 +117,10 @@ static void check_node(ASTNode *node) {
             check_node(node->data.while_loop.condition);
             check_node(node->data.while_loop.body);
             break;
+        case AST_FOR_STMT:
+            check_node(node->data.for_loop.iterable);
+            check_node(node->data.for_loop.body);
+            break;
         case AST_BINOP:
             if (strcmp(node->data.binop.op, "=") == 0 && node->data.binop.right->type == AST_IDENT) {
                 VarState *v = find_var(node->data.binop.right->data.ident.name);
@@ -138,6 +142,10 @@ static void check_node(ASTNode *node) {
                 }
                 check_node(arg);
             }
+            break;
+        case AST_MATCH_ARM:
+            check_node(node->data.match_arm.pattern);
+            check_node(node->data.match_arm.body);
             break;
         case AST_MOD:
             if (node->data.module.body) check_node(node->data.module.body);

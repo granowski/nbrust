@@ -27,6 +27,26 @@ void ast_free(ASTNode *node) {
             }
             if (node->data.func.params) free(node->data.func.params);
             ast_free(node->data.func.body);
+            if (node->data.func.generic_params) {
+                for (int i = 0; i < node->data.func.generic_param_count; i++) {
+                    free(node->data.func.generic_params[i]);
+                    if (node->data.func.generic_bounds && node->data.func.generic_bounds[i]) {
+                        for (int j = 0; j < node->data.func.generic_bounds_counts[i]; j++) {
+                            ast_free(node->data.func.generic_bounds[i][j]);
+                        }
+                        free(node->data.func.generic_bounds[i]);
+                    }
+                }
+                free(node->data.func.generic_params);
+                if (node->data.func.generic_bounds) free(node->data.func.generic_bounds);
+                if (node->data.func.generic_bounds_counts) free(node->data.func.generic_bounds_counts);
+            }
+            if (node->data.func.where_clauses) {
+                for (int i = 0; i < node->data.func.where_clause_count; i++) {
+                    ast_free(node->data.func.where_clauses[i]);
+                }
+                free(node->data.func.where_clauses);
+            }
             break;
         case AST_PARAM:
             free(node->data.param.name);
@@ -65,6 +85,11 @@ void ast_free(ASTNode *node) {
             ast_free(node->data.while_loop.condition);
             ast_free(node->data.while_loop.body);
             break;
+        case AST_FOR_STMT:
+            free(node->data.for_loop.var_name);
+            ast_free(node->data.for_loop.iterable);
+            ast_free(node->data.for_loop.body);
+            break;
         case AST_RETURN:
             ast_free(node->data.ret_stmt.value);
             break;
@@ -81,6 +106,26 @@ void ast_free(ASTNode *node) {
                 ast_free(node->data.struct_decl.fields[i]);
             }
             if (node->data.struct_decl.fields) free(node->data.struct_decl.fields);
+            if (node->data.struct_decl.generic_params) {
+                for (int i = 0; i < node->data.struct_decl.generic_param_count; i++) {
+                    free(node->data.struct_decl.generic_params[i]);
+                    if (node->data.struct_decl.generic_bounds && node->data.struct_decl.generic_bounds[i]) {
+                        for (int j = 0; j < node->data.struct_decl.generic_bounds_counts[i]; j++) {
+                            ast_free(node->data.struct_decl.generic_bounds[i][j]);
+                        }
+                        free(node->data.struct_decl.generic_bounds[i]);
+                    }
+                }
+                free(node->data.struct_decl.generic_params);
+                if (node->data.struct_decl.generic_bounds) free(node->data.struct_decl.generic_bounds);
+                if (node->data.struct_decl.generic_bounds_counts) free(node->data.struct_decl.generic_bounds_counts);
+            }
+            if (node->data.struct_decl.where_clauses) {
+                for (int i = 0; i < node->data.struct_decl.where_clause_count; i++) {
+                    ast_free(node->data.struct_decl.where_clauses[i]);
+                }
+                free(node->data.struct_decl.where_clauses);
+            }
             break;
         case AST_STRUCT_INIT:
             free(node->data.struct_init.struct_name);
@@ -137,8 +182,22 @@ void ast_free(ASTNode *node) {
             if (node->data.enum_decl.generic_params) {
                 for (int i = 0; i < node->data.enum_decl.generic_param_count; i++) {
                     free(node->data.enum_decl.generic_params[i]);
+                    if (node->data.enum_decl.generic_bounds && node->data.enum_decl.generic_bounds[i]) {
+                        for (int j = 0; j < node->data.enum_decl.generic_bounds_counts[i]; j++) {
+                            ast_free(node->data.enum_decl.generic_bounds[i][j]);
+                        }
+                        free(node->data.enum_decl.generic_bounds[i]);
+                    }
                 }
                 free(node->data.enum_decl.generic_params);
+                if (node->data.enum_decl.generic_bounds) free(node->data.enum_decl.generic_bounds);
+                if (node->data.enum_decl.generic_bounds_counts) free(node->data.enum_decl.generic_bounds_counts);
+            }
+            if (node->data.enum_decl.where_clauses) {
+                for (int i = 0; i < node->data.enum_decl.where_clause_count; i++) {
+                    ast_free(node->data.enum_decl.where_clauses[i]);
+                }
+                free(node->data.enum_decl.where_clauses);
             }
             break;
         case AST_ENUM_VARIANT:
@@ -203,6 +262,34 @@ void ast_free(ASTNode *node) {
             free(node->data.const_decl.type_name);
             ast_free(node->data.const_decl.value);
             break;
+        case AST_TRAIT_IMPL:
+            if (node->data.trait_impl.trait_name) free(node->data.trait_impl.trait_name);
+            if (node->data.trait_impl.struct_name) free(node->data.trait_impl.struct_name);
+            for (int i = 0; i < node->data.trait_impl.method_count; i++) {
+                ast_free(node->data.trait_impl.methods[i]);
+            }
+            if (node->data.trait_impl.methods) free(node->data.trait_impl.methods);
+            if (node->data.trait_impl.generic_params) {
+                for (int i = 0; i < node->data.trait_impl.generic_param_count; i++) {
+                    free(node->data.trait_impl.generic_params[i]);
+                    if (node->data.trait_impl.generic_bounds && node->data.trait_impl.generic_bounds[i]) {
+                        for (int j = 0; j < node->data.trait_impl.generic_bounds_counts[i]; j++) {
+                            ast_free(node->data.trait_impl.generic_bounds[i][j]);
+                        }
+                        free(node->data.trait_impl.generic_bounds[i]);
+                    }
+                }
+                free(node->data.trait_impl.generic_params);
+                if (node->data.trait_impl.generic_bounds) free(node->data.trait_impl.generic_bounds);
+                if (node->data.trait_impl.generic_bounds_counts) free(node->data.trait_impl.generic_bounds_counts);
+            }
+            if (node->data.trait_impl.where_clauses) {
+                for (int i = 0; i < node->data.trait_impl.where_clause_count; i++) {
+                    ast_free(node->data.trait_impl.where_clauses[i]);
+                }
+                free(node->data.trait_impl.where_clauses);
+            }
+            break;
         case AST_CAST:
             ast_free(node->data.cast.expr);
             free(node->data.cast.type_name);
@@ -225,6 +312,74 @@ ASTNode *parse_expression(Parser *p);
 static ASTNode *parse_expression_no_struct(Parser *p);
 ASTNode *parse_statement(Parser *p);
 static ASTNode *parse_pattern(Parser *p);
+
+// Generic parsing helpers
+static void parse_generic_params_with_bounds(Parser *p, char ***names, ASTNode ****bounds, int **bounds_counts, int *count) {
+    if (p->current.type != TOKEN_LT) return;
+    consume(p, TOKEN_LT);
+    *names = malloc(sizeof(char*) * 10);
+    *bounds = malloc(sizeof(ASTNode**) * 10);
+    *bounds_counts = malloc(sizeof(int) * 10);
+    *count = 0;
+    while (p->current.type != TOKEN_GT && p->current.type != TOKEN_EOF) {
+        if (p->current.type == TOKEN_IDENT) {
+            (*names)[*count] = strdup(p->current.text);
+            consume(p, TOKEN_IDENT);
+            
+            // Parse bounds if present: T: Bound1 + Bound2
+            if (p->current.type == TOKEN_COLON) {
+                consume(p, TOKEN_COLON);
+                ASTNode **current_bounds = malloc(sizeof(ASTNode*) * 5);
+                int current_count = 0;
+                while (p->current.type != TOKEN_COMMA && p->current.type != TOKEN_GT && p->current.type != TOKEN_EOF) {
+                    char *bound_name = parse_type(p);
+                    ASTNode *bound = ast_new(AST_IDENT);
+                    bound->data.ident.name = bound_name;
+                    current_bounds[current_count++] = bound;
+                    if (p->current.type == TOKEN_PLUS) consume(p, TOKEN_PLUS);
+                    else break;
+                }
+                (*bounds)[*count] = current_bounds;
+                (*bounds_counts)[*count] = current_count;
+            } else {
+                (*bounds)[*count] = NULL;
+                (*bounds_counts)[*count] = 0;
+            }
+            (*count)++;
+        }
+        if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
+    }
+    consume(p, TOKEN_GT);
+}
+
+static void parse_where_clause(Parser *p, ASTNode ***clauses, int *count) {
+    if (p->current.type != TOKEN_WHERE) return;
+    consume(p, TOKEN_WHERE);
+    *clauses = malloc(sizeof(ASTNode*) * 10);
+    *count = 0;
+    while (p->current.type != TOKEN_LBRACE && p->current.type != TOKEN_SEMICOLON && p->current.type != TOKEN_EOF) {
+        // T: Bound
+        char *type_name = parse_type(p);
+        consume(p, TOKEN_COLON);
+        while (p->current.type != TOKEN_COMMA && p->current.type != TOKEN_LBRACE && p->current.type != TOKEN_SEMICOLON && p->current.type != TOKEN_EOF) {
+            char *bound_name = parse_type(p);
+            ASTNode *clause = ast_new(AST_BINOP); // Using binop for Type: Bound for now
+            clause->data.binop.op = strdup(":");
+            ASTNode *left = ast_new(AST_IDENT);
+            left->data.ident.name = strdup(type_name);
+            ASTNode *right = ast_new(AST_IDENT);
+            right->data.ident.name = bound_name;
+            clause->data.binop.left = left;
+            clause->data.binop.right = right;
+            (*clauses)[(*count)++] = clause;
+            if (p->current.type == TOKEN_PLUS) consume(p, TOKEN_PLUS);
+            else break;
+        }
+        free(type_name);
+        if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
+        else break;
+    }
+}
 
 void real_consume(Parser *p, TokenType type, int call_line, const char *type_name) {
     if (p->current.type == type) {
@@ -493,15 +648,17 @@ static ASTNode *parse_primary(Parser *p, int allow_struct_init) {
             consume(p, TOKEN_BANG);
             ASTNode **args = malloc(sizeof(ASTNode*) * 10);
             int arg_count = 0;
-            if (p->current.type == TOKEN_LPAREN) {
-                consume(p, TOKEN_LPAREN);
-                while (p->current.type != TOKEN_RPAREN && p->current.type != TOKEN_EOF) {
+            if (p->current.type == TOKEN_LPAREN || p->current.type == TOKEN_LBRACKET || p->current.type == TOKEN_LBRACE) {
+                TokenType open = p->current.type;
+                TokenType close = (open == TOKEN_LPAREN) ? TOKEN_RPAREN : (open == TOKEN_LBRACKET ? TOKEN_RBRACKET : TOKEN_RBRACE);
+                consume(p, open);
+                while (p->current.type != close && p->current.type != TOKEN_EOF) {
                     args[arg_count++] = parse_expression(p);
                     if (p->current.type == TOKEN_COMMA) {
                         consume(p, TOKEN_COMMA);
                     }
                 }
-                consume(p, TOKEN_RPAREN);
+                consume(p, close);
             }
             ASTNode *node = ast_new(AST_MACRO_CALL);
             node->data.macro_call.name = name;
@@ -707,6 +864,62 @@ static ASTNode *parse_primary(Parser *p, int allow_struct_init) {
         node->data.while_loop.condition = condition;
         node->data.while_loop.body = body;
         return node;
+    } else if (p->current.type == TOKEN_FOR) {
+        consume(p, TOKEN_FOR);
+        char *var_name = strdup(p->current.text);
+        consume(p, TOKEN_IDENT);
+        consume(p, TOKEN_IN);
+        ASTNode *iterable = parse_expression_no_struct(p);
+        ASTNode *body = parse_block(p);
+
+        /* Desugar: 
+           {
+             let mut __iter = IntoIterator::into_iter(iterable);
+             while let Some(var_name) = __iter.next() {
+                body
+             }
+           }
+           Actually, simpler for now:
+           {
+             let mut __iter = iterable.into_iter();
+             while { let __next = __iter.next(); match __next { Some(var_name) => true, None => false } } {
+                let var_name = match __next { Some(v) => v };
+                body
+             }
+           }
+           Wait, 'while let' is better but nbrust might not have it.
+           Let's use a simple while with match.
+        */
+        ASTNode *block = ast_new(AST_BLOCK);
+        block->data.block.statements = malloc(sizeof(ASTNode*) * 2);
+        block->data.block.count = 2;
+
+        // let mut __iter = iterable.into_iter();
+        ASTNode *iter_init = ast_new(AST_VAR_DECL);
+        iter_init->data.var_decl.name = strdup("__iter");
+        iter_init->data.var_decl.is_mutable = 1;
+        
+        ASTNode *into_iter_call = ast_new(AST_METHOD_CALL);
+        into_iter_call->data.method_call.receiver = iterable;
+        into_iter_call->data.method_call.method_name = strdup("into_iter");
+        into_iter_call->data.method_call.args = NULL;
+        into_iter_call->data.method_call.arg_count = 0;
+        iter_init->data.var_decl.init = into_iter_call;
+        block->data.block.statements[0] = iter_init;
+
+        // while loop
+        ASTNode *while_node = ast_new(AST_WHILE);
+        
+        // condition: { __next = __iter.next(); match __next { Some(_) => true, None => false } }
+        // For simplicity in nbrust codegen, let's use a helper or specific AST_FOR_STMT if we want it to be clean.
+        // But desugaring is more robust if we have the building blocks.
+        // Let's use AST_FOR_STMT and handle it in codegen to avoid complex desugaring here.
+        
+        ASTNode *for_node = ast_new(AST_FOR_STMT);
+        for_node->data.for_loop.var_name = var_name;
+        for_node->data.for_loop.iterable = iterable;
+        for_node->data.for_loop.body = body;
+        return for_node;
     } else if (p->current.type == TOKEN_MATCH) {
         consume(p, TOKEN_MATCH);
         ASTNode *expr = parse_expression_no_struct(p);
@@ -1071,24 +1284,9 @@ ASTNode *parse_struct(Parser *p) {
     ASTNode *node = ast_new(AST_STRUCT_DECL);
     node->data.struct_decl.name = name;
 
-    if (p->current.type == TOKEN_LT) {
-        consume(p, TOKEN_LT);
-        char **generic_params = malloc(sizeof(char*) * 10);
-        int generic_param_count = 0;
-        while (p->current.type != TOKEN_GT && p->current.type != TOKEN_EOF) {
-            if (p->current.type == TOKEN_IDENT) {
-                generic_params[generic_param_count++] = strdup(p->current.text);
-                consume(p, TOKEN_IDENT);
-            } else {
-                // skip other tokens in generics for now
-                consume(p, p->current.type);
-            }
-            if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
-        }
-        consume(p, TOKEN_GT);
-        node->data.struct_decl.generic_params = generic_params;
-        node->data.struct_decl.generic_param_count = generic_param_count;
-    }
+    parse_generic_params_with_bounds(p, &node->data.struct_decl.generic_params, &node->data.struct_decl.generic_bounds, &node->data.struct_decl.generic_bounds_counts, &node->data.struct_decl.generic_param_count);
+
+    parse_where_clause(p, &node->data.struct_decl.where_clauses, &node->data.struct_decl.where_clause_count);
 
     if (p->current.type == TOKEN_SEMICOLON) {
         // Unit struct: struct Foo;
@@ -1148,17 +1346,10 @@ ASTNode *parse_impl(Parser *p) {
     consume(p, TOKEN_IMPL);
     
     char **generic_params = NULL;
+    ASTNode ***generic_bounds = NULL;
+    int *generic_bounds_counts = NULL;
     int generic_param_count = 0;
-    if (p->current.type == TOKEN_LT) {
-        consume(p, TOKEN_LT);
-        generic_params = malloc(sizeof(char*) * 10);
-        while (p->current.type != TOKEN_GT && p->current.type != TOKEN_EOF) {
-            generic_params[generic_param_count++] = strdup(p->current.text);
-            consume(p, TOKEN_IDENT);
-            if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
-        }
-        consume(p, TOKEN_GT);
-    }
+    parse_generic_params_with_bounds(p, &generic_params, &generic_bounds, &generic_bounds_counts, &generic_param_count);
     
     char *trait_name = NULL;
     char *struct_name = strdup(p->current.text);
@@ -1185,6 +1376,10 @@ ASTNode *parse_impl(Parser *p) {
         consume(p, TOKEN_IDENT);
         if (p->current.type == TOKEN_FOR) consume(p, TOKEN_FOR); // Should have been handled above, but just in case
     }
+
+    ASTNode **where_clauses = NULL;
+    int where_clause_count = 0;
+    parse_where_clause(p, &where_clauses, &where_clause_count);
     
     consume(p, TOKEN_LBRACE);
     
@@ -1212,12 +1407,19 @@ ASTNode *parse_impl(Parser *p) {
         node->data.trait_impl.struct_name = struct_name;
         node->data.trait_impl.methods = items;
         node->data.trait_impl.method_count = item_count;
+        node->data.trait_impl.generic_params = generic_params;
+        node->data.trait_impl.generic_bounds = generic_bounds;
+        node->data.trait_impl.generic_bounds_counts = generic_bounds_counts;
+        node->data.trait_impl.generic_param_count = generic_param_count;
+        node->data.trait_impl.where_clauses = where_clauses;
+        node->data.trait_impl.where_clause_count = where_clause_count;
         return node;
     } else {
         ASTNode *node = ast_new(AST_IMPL);
         node->data.impl_block.struct_name = struct_name;
         node->data.impl_block.methods = items;
         node->data.impl_block.method_count = item_count;
+        // impl blocks don't currently store generics/where clauses in ASTNode
         return node;
     }
 }
@@ -1230,23 +1432,9 @@ ASTNode *parse_enum(Parser *p) {
     ASTNode *node = ast_new(AST_ENUM_DECL);
     node->data.enum_decl.name = name;
 
-    if (p->current.type == TOKEN_LT) {
-        consume(p, TOKEN_LT);
-        char **generic_params = malloc(sizeof(char*) * 10);
-        int generic_param_count = 0;
-        while (p->current.type != TOKEN_GT && p->current.type != TOKEN_EOF) {
-            if (p->current.type == TOKEN_IDENT) {
-                generic_params[generic_param_count++] = strdup(p->current.text);
-                consume(p, TOKEN_IDENT);
-            } else {
-                consume(p, p->current.type);
-            }
-            if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
-        }
-        consume(p, TOKEN_GT);
-        node->data.enum_decl.generic_params = generic_params;
-        node->data.enum_decl.generic_param_count = generic_param_count;
-    }
+    parse_generic_params_with_bounds(p, &node->data.enum_decl.generic_params, &node->data.enum_decl.generic_bounds, &node->data.enum_decl.generic_bounds_counts, &node->data.enum_decl.generic_param_count);
+
+    parse_where_clause(p, &node->data.enum_decl.where_clauses, &node->data.enum_decl.where_clause_count);
     
     consume(p, TOKEN_LBRACE);
     
@@ -1363,29 +1551,8 @@ ASTNode *parse_function(Parser *p) {
     ASTNode *node = ast_new(AST_FUNC);
     node->data.func.name = name;
 
-    if (p->current.type == TOKEN_LT) {
-        consume(p, TOKEN_LT);
-        char **generic_params = malloc(sizeof(char*) * 10);
-        int generic_param_count = 0;
-        while (p->current.type != TOKEN_GT && p->current.type != TOKEN_EOF) {
-            generic_params[generic_param_count++] = strdup(p->current.text);
-            consume(p, TOKEN_IDENT);
-            if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
-        }
-        consume(p, TOKEN_GT);
-        node->data.func.generic_params = generic_params;
-        node->data.func.generic_param_count = generic_param_count;
-    }
-    
-    if (p->current.type == TOKEN_LT) {
-        consume(p, TOKEN_LT);
-        while (p->current.type != TOKEN_GT && p->current.type != TOKEN_EOF) {
-            consume(p, TOKEN_IDENT);
-            if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
-        }
-        consume(p, TOKEN_GT);
-    }
-    
+    parse_generic_params_with_bounds(p, &node->data.func.generic_params, &node->data.func.generic_bounds, &node->data.func.generic_bounds_counts, &node->data.func.generic_param_count);
+
     consume(p, TOKEN_LPAREN);
     
     ASTNode **params = malloc(sizeof(ASTNode*) * 10);
@@ -1431,6 +1598,8 @@ ASTNode *parse_function(Parser *p) {
     node->data.func.param_count = param_count;
     node->data.func.return_type = return_type;
     
+    parse_where_clause(p, &node->data.func.where_clauses, &node->data.func.where_clause_count);
+
     if (p->current.type == TOKEN_LBRACE) {
         ASTNode *body = parse_block(p);
         node->data.func.body = body;

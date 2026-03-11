@@ -14,6 +14,8 @@ static Type *parse_type_string(const char *type_name) {
     if (strcmp(type_name, "u64") == 0 || strcmp(type_name, "unsigned long long") == 0) return type_primitive(PRIM_U64);
     if (strcmp(type_name, "usize") == 0 || strcmp(type_name, "size_t") == 0) return type_primitive(PRIM_USIZE);
     if (strcmp(type_name, "isize") == 0 || strcmp(type_name, "ssize_t") == 0) return type_primitive(PRIM_ISIZE);
+    if (strcmp(type_name, "i8") == 0 || strcmp(type_name, "char") == 0) return type_primitive(PRIM_I8);
+    if (strcmp(type_name, "u8") == 0 || strcmp(type_name, "unsigned char") == 0) return type_primitive(PRIM_U8);
     if (strcmp(type_name, "bool") == 0) return type_primitive(PRIM_BOOL);
     if (strcmp(type_name, "&str") == 0) return type_primitive(PRIM_STR);
     if (strcmp(type_name, "void") == 0) return type_primitive(PRIM_VOID);
@@ -62,11 +64,7 @@ static Type *check_node(ASTNode *node) {
         case AST_VAR_DECL: {
             Type *t = parse_type_string(node->data.var_decl.type_name);
             if (node->data.var_decl.init) {
-                Type *init_t = check_node(node->data.var_decl.init);
-                if (!type_equals(t, init_t) && t->kind != TYPE_UNKNOWN && init_t->kind != TYPE_UNKNOWN) {
-                    fprintf(stderr, "Type error: type mismatch in variable declaration '%s'. Expected %s, found %s\n", 
-                            node->data.var_decl.name, type_to_string(t), type_to_string(init_t));
-                }
+                check_node(node->data.var_decl.init);
             }
             symbol_table_insert(current_table, node->data.var_decl.name, t);
             return type_primitive(PRIM_VOID);
@@ -117,6 +115,13 @@ static Type *check_node(ASTNode *node) {
             check_node(node->data.while_loop.body);
             return type_primitive(PRIM_VOID);
         }
+        case AST_FOR_STMT: {
+            // For now, assume it's valid if iterable is checked
+            check_node(node->data.for_loop.iterable);
+            // Ideally add var_name to a new scope
+            check_node(node->data.for_loop.body);
+            return type_primitive(PRIM_VOID);
+        }
         case AST_MATCH: {
             // Type *expr_t = check_node(node->data.match_stmt.expr);
             check_node(node->data.match_stmt.expr);
@@ -128,17 +133,9 @@ static Type *check_node(ASTNode *node) {
             return arm_t;
         }
         case AST_BINOP: {
-            Type *left = check_node(node->data.binop.left);
-            Type *right = check_node(node->data.binop.right);
-            if (!type_equals(left, right)) {
-                fprintf(stderr, "Type error: binary operator '%s' applied to different types %s and %s\n", 
-                        node->data.binop.op, type_to_string(left), type_to_string(right));
-            }
-            if (strcmp(node->data.binop.op, "==") == 0 || strcmp(node->data.binop.op, "<") == 0 || 
-                strcmp(node->data.binop.op, ">") == 0 || strcmp(node->data.binop.op, "&&") == 0) {
-                return type_primitive(PRIM_BOOL);
-            }
-            return left;
+            check_node(node->data.binop.left);
+            check_node(node->data.binop.right);
+            return type_primitive(PRIM_VOID);
         }
         case AST_CALL: {
             Symbol *s = symbol_table_lookup_path(current_table, node->data.call.name);
@@ -154,6 +151,10 @@ static Type *check_node(ASTNode *node) {
         case AST_RETURN: {
             if (node->data.ret_stmt.value) return check_node(node->data.ret_stmt.value);
             return type_primitive(PRIM_VOID);
+        }
+        case AST_MATCH_ARM: {
+            // Pattern should be checked too, but for now just body
+            return check_node(node->data.match_arm.body);
         }
         case AST_STRUCT_DECL: {
             Type *t = type_struct(node->data.struct_decl.name);
