@@ -263,6 +263,7 @@ static void codegen_node(ASTNode *node, FILE *out, Target target) {
             } else {
                 fprintf(out, ".global %s\n", node->data.func.name);
                 fprintf(out, ".type %s, %%function\n", node->data.func.name);
+                fprintf(out, ".section .text\n");
                 fprintf(out, "%s:\n", node->data.func.name);
             }
 

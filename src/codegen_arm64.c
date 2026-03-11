@@ -214,8 +214,15 @@ static void codegen_expr(ASTNode *node, FILE *out, Target target) {
                 // Pass arguments in x0-x7
                 for (int i = 0; i < node->data.macro_call.arg_count && i < 8; i++) {
                     codegen_expr(node->data.macro_call.args[i], out, target);
-                    fprintf(out, "    mov x%d, x0\n", i);
+                    // Result of expression is in x0, but we need to move it to x0-x7
+                    // for the actual call. We need a way to move it to x_i.
+                    // Since codegen_expr results in x0, we should save it and then move.
+                    fprintf(out, "    str x0, [sp, #-16]!\n");
                 }
+                for (int i = node->data.macro_call.arg_count - 1; i >= 0 && i < 8; i--) {
+                    fprintf(out, "    ldr x%d, [sp], #16\n", i);
+                }
+
                 if (target.os == OS_MACOS) {
                     fprintf(out, "    bl _printf\n");
                 } else {
@@ -281,6 +288,7 @@ static void codegen_node(ASTNode *node, FILE *out, Target target) {
             } else {
                 fprintf(out, ".global %s\n", node->data.func.name);
                 fprintf(out, ".type %s, %%function\n", node->data.func.name);
+                fprintf(out, ".section .text\n");
                 fprintf(out, "%s:\n", node->data.func.name);
             }
 

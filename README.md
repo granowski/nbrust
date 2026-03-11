@@ -47,7 +47,9 @@ To build and run a project using `nbcargo`:
 
 #### Current Capabilities
 
-This implementation supports a subset of Rust and transpiles it to C (C23 standard) or ARM assembly:
+This implementation supports a significant subset of Rust and transpiles it to C (C23 standard) or ARM assembly (AArch64/ARMv6):
+- **Backends**: C, AArch64 (ARM64) Assembly, and ARMv6 Assembly.
+- **Targets**: macOS and NetBSD (ELF).
 - **Functions & Top-Level Statements**: Support for parameters, return types, and multiple functions per file.
 - **Variables**: `let` and `let mut` declarations with optional type annotations and C23 `auto` inference.
 - **Control Flow**: `if`, `else`, `while`, `for`, and `return` statements.
@@ -55,24 +57,23 @@ This implementation supports a subset of Rust and transpiles it to C (C23 standa
 - **Enums (Sum-Types)**: Support for complex Enum variants (Unit, Tuple, Struct) with tagged union representation in the C backend.
 - **Pattern Matching**: `match` expressions with support for nested tuple and struct patterns.
 - **Traits & Methods**: `impl` blocks for structs and enums. Support for `trait` definitions, static dispatch, and dynamic dispatch (vtable-based) via `Box<dyn Trait>`.
-- **Generics & Monomorphization**: Basic support for generic functions, structs, and enums with a specialization engine.
+- **Advanced Type System**: Support for generics, monomorphization, and associated types, critical for trait completeness.
 - **Module System**: Hierarchical modules (`mod`), path resolution (`a::b::c`), and `use` statements for name resolution.
-- **Macros**: Support for `println!`, `print!`, `panic!`, `dbg!`, `matches!`, and `vec!` expansion.
-- **Standard Library**: A minimal `std` stub (in `std/src/lib.rs`) providing `Box`, `Vec`, `String`, `Option`, `Result`, and `HashMap`.
-- **Borrow Checking**: Initial support for move semantics and borrow rules.
-- **Cargo Support**: `Cargo.toml` parsing, project orchestration, and basic crates.io dependency fetching.
+- **Macro Engine**: Support for `macro_rules!` (structured expansion via re-parsing), and built-ins like `println!`, `print!`, `panic!`, `dbg!`, `matches!`, and `vec!`.
+- **Borrow Checker**: Scope-aware lifetime management, move-after-borrow detection, and end-of-block borrow release.
+- **Ownership & RAII**: Support for deterministic destruction hooks in the C backend, laying the foundation for the `Drop` trait.
+- **Unsafe Rust**: Support for raw pointer operations and `unsafe` blocks.
+- **Standard Library**: An expanded `std` stub (in `std/src/lib.rs`) providing `Box`, `Vec`, `String`, `Option`, `Result`, `HashMap`, and new `io` and `process` modules.
+- **Cargo Tool (`nbcargo`)**: `Cargo.toml` parsing, dependency resolution, and project orchestration.
 - **Executable Generation**: Integrated driver to invoke system assemblers, linkers, or C compilers to produce binaries.
 
-#### Roadmap to `rustc` & `cargo` Parity
+#### Roadmap to NetBSD Self-Hosting
 
-To reach the point where `nbrust` can compile `rustc` and `cargo` themselves, the following milestones must be achieved:
+With core feature parity achieved, the next milestones focus on stabilization and self-hosting:
 
-1. **Borrow Checker Completeness**: Move from basic tracking to full lexical/non-lexical lifetimes (NLL) and data-flow analysis.
-2. **Robust Macro Engine**: Implement a full token-based `macro_rules!` engine with hygiene and complex pattern matching.
-3. **Advanced Type System**: Support for associated types, higher-rank trait bounds (HRTBs), and more comprehensive type inference.
-4. **Standard Library Expansion**: Implement enough of `std` to support the compiler's own needs (I/O, collections, process management).
-5. **Ownership & RAII**: Full support for `Drop` trait and deterministic destruction in the C backend.
-6. **Detailed Diagnostics**: Provide high-quality error messages with spans and suggestions.
-7. **Module System Refinement**: Full support for visibility rules (`pub(crate)`, etc.) and complex `use` imports.
-8. **Cargo Workspace Support**: Handle multi-crate workspaces and build scripts (`build.rs`).
-9. **Unsafe Rust**: Full support for raw pointers and `unsafe` blocks (currently partially supported).
+1. **Self-Hosting Verification**: Compiling `nbrust` and `nbcargo` using themselves on NetBSD.
+2. **Performance Optimization**: Reducing memory footprint and improving compilation speed.
+3. **Advanced Lifetime Analysis**: Moving towards full non-lexical lifetimes (NLL).
+4. **Diagnostic Improvements**: Enhancing error reporting with more detailed spans and recovery.
+5. **Standard Library Completeness**: Implementing more of `std` as required by more complex crates.
+6. **Cargo Workspace Support**: Improving handling for multi-crate workspaces and build scripts.
