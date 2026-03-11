@@ -213,6 +213,9 @@ Token lexer_next_token(Lexer *l) {
                 return make_token(TOKEN_BAR_BAR, "||", line, col);
             }
             return make_token(TOKEN_BAR, "|", line, col);
+        case '$': return make_token(TOKEN_DOLLAR, "$", line, col);
+        case '[': return make_token(TOKEN_LBRACKET, "[", line, col);
+        case ']': return make_token(TOKEN_RBRACKET, "]", line, col);
     }
 
     return make_token(TOKEN_UNKNOWN, text, line, col);

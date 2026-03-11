@@ -3,6 +3,24 @@ pub enum Result<T, E> {
     Err(E),
 }
 
+pub struct String {
+    vec: Vec<u8>,
+}
+
+impl String {
+    pub fn new() -> Self {
+        String { vec: Vec::new() }
+    }
+    pub fn len(&self) -> usize {
+        self.vec.len()
+    }
+}
+
+pub trait Iterator {
+    type Item;
+    fn next(&mut self) -> Option<Self::Item>;
+}
+
 pub enum Option<T> {
     Some(T),
     None,

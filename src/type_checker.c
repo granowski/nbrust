@@ -212,6 +212,65 @@ static Type *check_node(ASTNode *node) {
             }
             return type_primitive(PRIM_VOID);
         }
+        case AST_TYPE_ALIAS: {
+            Type *t = parse_type_string(node->data.type_alias.type_name);
+            symbol_table_insert(current_table, node->data.type_alias.name, t);
+            return type_primitive(PRIM_VOID);
+        }
+        case AST_CONST: {
+            Type *t = parse_type_string(node->data.const_decl.type_name);
+            if (node->data.const_decl.value) {
+                Type *val_t = check_node(node->data.const_decl.value);
+                if (!type_equals(t, val_t) && t->kind != TYPE_UNKNOWN && val_t->kind != TYPE_UNKNOWN) {
+                    fprintf(stderr, "Type error: type mismatch in const '%s'. Expected %s, found %s\n", 
+                            node->data.const_decl.name, type_to_string(t), type_to_string(val_t));
+                }
+            }
+            symbol_table_insert(current_table, node->data.const_decl.name, t);
+            return type_primitive(PRIM_VOID);
+        }
+        case AST_TRAIT_IMPL: {
+            // Find the struct in the symbol table
+            Symbol *s = symbol_table_lookup(current_table, node->data.trait_impl.struct_name);
+            if (s) {
+                if (!s->scope) {
+                    s->scope = symbol_table_new(current_table, node->data.trait_impl.struct_name);
+                }
+                SymbolTable *old_table = current_table;
+                current_table = s->scope;
+                
+                // Register associated items in the struct's scope
+                for (int i = 0; i < node->data.trait_impl.method_count; i++) {
+                    check_node(node->data.trait_impl.methods[i]);
+                }
+                current_table = old_table;
+            } else {
+                // If struct not found, just check the methods in current scope
+                for (int i = 0; i < node->data.trait_impl.method_count; i++) {
+                    check_node(node->data.trait_impl.methods[i]);
+                }
+            }
+            return type_primitive(PRIM_VOID);
+        }
+        case AST_IMPL: {
+            Symbol *s = symbol_table_lookup(current_table, node->data.impl_block.struct_name);
+            if (s) {
+                if (!s->scope) {
+                    s->scope = symbol_table_new(current_table, node->data.impl_block.struct_name);
+                }
+                SymbolTable *old_table = current_table;
+                current_table = s->scope;
+                for (int i = 0; i < node->data.impl_block.method_count; i++) {
+                    check_node(node->data.impl_block.methods[i]);
+                }
+                current_table = old_table;
+            } else {
+                for (int i = 0; i < node->data.impl_block.method_count; i++) {
+                    check_node(node->data.impl_block.methods[i]);
+                }
+            }
+            return type_primitive(PRIM_VOID);
+        }
         default:
             return type_primitive(PRIM_VOID);
     }

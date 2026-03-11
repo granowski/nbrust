@@ -104,12 +104,32 @@ static ASTNode *specialize_node(ASTNode *node, char **params, char **args, int c
                 new_node->data.block.statements[i] = specialize_node(node->data.block.statements[i], params, args, count);
             }
             break;
-        case AST_CALL:
-            new_node->data.call.name = strdup(node->data.call.name);
-            new_node->data.call.args = malloc(sizeof(ASTNode*) * node->data.call.arg_count);
-            for (int i = 0; i < node->data.call.arg_count; i++) {
-                new_node->data.call.args[i] = specialize_node(node->data.call.args[i], params, args, count);
+        case AST_ENUM_DECL:
+            new_node->data.enum_decl.name = malloc(strlen(node->data.enum_decl.name) + 32);
+            sprintf(new_node->data.enum_decl.name, "%s_%s", node->data.enum_decl.name, args[0]); // Simple mangling for now
+            new_node->data.enum_decl.variants = malloc(sizeof(ASTNode*) * node->data.enum_decl.variant_count);
+            for (int i = 0; i < node->data.enum_decl.variant_count; i++) {
+                new_node->data.enum_decl.variants[i] = specialize_node(node->data.enum_decl.variants[i], params, args, count);
             }
+            new_node->data.enum_decl.generic_params = NULL;
+            new_node->data.enum_decl.generic_param_count = 0;
+            break;
+        case AST_ENUM_VARIANT:
+            new_node->data.enum_variant.name = strdup(node->data.enum_variant.name);
+            new_node->data.enum_variant.fields = malloc(sizeof(ASTNode*) * node->data.enum_variant.field_count);
+            for (int i = 0; i < node->data.enum_variant.field_count; i++) {
+                new_node->data.enum_variant.fields[i] = specialize_node(node->data.enum_variant.fields[i], params, args, count);
+            }
+            break;
+        case AST_STRUCT_DECL:
+            new_node->data.struct_decl.name = malloc(strlen(node->data.struct_decl.name) + 32);
+            sprintf(new_node->data.struct_decl.name, "%s_%s", node->data.struct_decl.name, args[0]);
+            new_node->data.struct_decl.fields = malloc(sizeof(ASTNode*) * node->data.struct_decl.field_count);
+            for (int i = 0; i < node->data.struct_decl.field_count; i++) {
+                new_node->data.struct_decl.fields[i] = specialize_node(node->data.struct_decl.fields[i], params, args, count);
+            }
+            new_node->data.struct_decl.generic_params = NULL;
+            new_node->data.struct_decl.generic_param_count = 0;
             break;
         // ... handle other types ...
         default: break;

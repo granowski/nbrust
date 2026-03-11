@@ -966,20 +966,31 @@ ASTNode *parse_macro_rules(Parser *p) {
     char *name = strdup(p->current.text);
     consume(p, TOKEN_IDENT);
     
-    // For now, we skip the body of macro_rules! and just store it as text if we could.
-    // Since we don't have a good way to grab raw text, let's just skip to the end of the block.
-    if (p->current.type == TOKEN_LBRACE) {
-        int brace_count = 0;
-        do {
-            if (p->current.type == TOKEN_LBRACE) brace_count++;
-            if (p->current.type == TOKEN_RBRACE) brace_count--;
+    // We need to capture the raw body for expansion.
+    // For now, let's capture the tokens between { and } as a string or a list of tokens.
+    // Since we only have body_text, let's try to reconstruct it.
+    char *body = malloc(4096);
+    body[0] = '\0';
+    
+    if (p->current.type == TOKEN_LBRACE || p->current.type == TOKEN_LPAREN || p->current.type == TOKEN_LBRACKET) {
+        TokenType open = p->current.type;
+        TokenType close = (open == TOKEN_LBRACE) ? TOKEN_RBRACE : (open == TOKEN_LPAREN ? TOKEN_RPAREN : TOKEN_RBRACKET);
+        
+        strcat(body, p->current.text);
+        consume(p, open);
+        int nest_count = 1;
+        while (nest_count > 0 && p->current.type != TOKEN_EOF) {
+            strcat(body, " ");
+            strcat(body, p->current.text);
+            if (p->current.type == open) nest_count++;
+            else if (p->current.type == close) nest_count--;
             consume(p, p->current.type);
-        } while (brace_count > 0 && p->current.type != TOKEN_EOF);
+        }
     }
     
     ASTNode *node = ast_new(AST_MACRO_RULES);
     node->data.macro_rules.name = name;
-    node->data.macro_rules.body_text = strdup("/* macro body skipped */");
+    node->data.macro_rules.body_text = body;
     return node;
 }
 

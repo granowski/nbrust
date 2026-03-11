@@ -64,6 +64,9 @@ typedef enum {
     TOKEN_TYPE,       // type
     TOKEN_CONST,      // const
     TOKEN_AS,         // as
+    TOKEN_DOLLAR,     // $
+    TOKEN_LBRACKET,   // [
+    TOKEN_RBRACKET,   // ]
     TOKEN_EOF,
     TOKEN_UNKNOWN
 } TokenType;

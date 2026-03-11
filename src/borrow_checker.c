@@ -102,8 +102,33 @@ static void check_node(ASTNode *node) {
                 check_node(arg);
             }
             break;
+        case AST_IF:
+            check_node(node->data.if_stmt.condition);
+            check_node(node->data.if_stmt.then_branch);
+            if (node->data.if_stmt.else_branch) check_node(node->data.if_stmt.else_branch);
+            break;
+        case AST_WHILE:
+            check_node(node->data.while_loop.condition);
+            check_node(node->data.while_loop.body);
+            break;
+        case AST_BINOP:
+            check_node(node->data.binop.left);
+            check_node(node->data.binop.right);
+            break;
+        case AST_MATCH:
+            check_node(node->data.match_stmt.expr);
+            for (int i = 0; i < node->data.match_stmt.arm_count; i++) {
+                check_node(node->data.match_stmt.arms[i]->data.match_arm.body);
+            }
+            break;
+        case AST_MOD:
+            if (node->data.module.body) check_node(node->data.module.body);
+            break;
+        case AST_RETURN:
+            if (node->data.ret_stmt.value) check_node(node->data.ret_stmt.value);
+            break;
         default:
-            // Recurse for common nodes like binary ops, if, while...
+            // Skip other nodes for now
             break;
     }
 }

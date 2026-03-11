@@ -271,8 +271,8 @@ static void process_file(const char *path, Target target) {
             macro_expand_run(ast);
             monomorphization_run(ast);
             
-            // type_checker_run(ast);
-            // borrow_checker_run(ast);
+            type_checker_run(ast);
+            borrow_checker_run(ast);
             
             // Check if we are in the main file and at the end of it
             static int once = 0;
