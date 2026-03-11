@@ -1,3 +1,20 @@
+pub struct Box<T> {
+    ptr: *mut T,
+}
+
+impl<T> Box<T> {
+    pub fn new(x: T) -> Self {
+        let ptr = unsafe { malloc(sizeof(T)) as *mut T };
+        unsafe { *ptr = x };
+        Box { ptr: ptr }
+    }
+}
+
+pub fn panic(msg: &str) -> ! {
+    println!("panic: {}", msg);
+    unsafe { exit(1) };
+}
+
 pub enum Result<T, E> {
     Ok(T),
     Err(E),

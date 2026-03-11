@@ -630,6 +630,11 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
         case AST_MACRO_RULES:
             fprintf(out, "/* macro_rules! %s skipped */\n", node->data.macro_rules.name);
             break;
+        case AST_CAST:
+            fprintf(out, "((%s)", node->data.cast.type_name);
+            codegen_node_ext(node->data.cast.expr, out, 1);
+            fprintf(out, ")");
+            break;
         case AST_ENUM_VARIANT:
             fprintf(out, "/* Enum Variant %s */", node->data.enum_variant.name);
             break;

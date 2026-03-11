@@ -278,6 +278,8 @@ static void process_file(const char *path, Target target) {
             static int once = 0;
             if (!once) {
                  printf("#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n");
+                 // Generate common aliases for C23-like feel or compatibility
+                 printf("typedef int i32;\ntypedef long long i64;\ntypedef unsigned int u32;\ntypedef unsigned long long u64;\ntypedef size_t usize;\n");
                  once = 1;
             }
             if (!is_generic) {

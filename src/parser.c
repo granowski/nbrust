@@ -2,7 +2,15 @@
 #include <stdlib.h>
 #include <string.h>
 
-ASTNode *ast_new(ASTNodeType type) {
+ASTNode *ast_new_at(ASTNodeType type, int line, int col) {
+    ASTNode *node = calloc(1, sizeof(ASTNode));
+    node->type = type;
+    node->line = line;
+    node->col = col;
+    return node;
+}
+
+ASTNode *ast_new_old(ASTNodeType type) {
     ASTNode *node = calloc(1, sizeof(ASTNode));
     node->type = type;
     return node;
@@ -186,6 +194,19 @@ void ast_free(ASTNode *node) {
             free(node->data.macro_rules.name);
             if (node->data.macro_rules.body_text) free(node->data.macro_rules.body_text);
             break;
+        case AST_TYPE_ALIAS:
+            free(node->data.type_alias.name);
+            free(node->data.type_alias.type_name);
+            break;
+        case AST_CONST:
+            free(node->data.const_decl.name);
+            free(node->data.const_decl.type_name);
+            ast_free(node->data.const_decl.value);
+            break;
+        case AST_CAST:
+            ast_free(node->data.cast.expr);
+            free(node->data.cast.type_name);
+            break;
     }
     free(node);
 }
@@ -195,6 +216,9 @@ void parser_init(Parser *p, Lexer *l) {
     p->current = lexer_next_token(l);
     p->next = lexer_next_token(l);
 }
+
+#undef ast_new
+#define ast_new(type) ast_new_at(type, p->current.line, p->current.col)
 
 static char *parse_type(Parser *p);
 ASTNode *parse_expression(Parser *p);
@@ -221,17 +245,14 @@ static char *parse_type(Parser *p) {
         consume(p, TOKEN_DYN);
     }
     if (p->current.type == TOKEN_STAR) {
-        strcat(buf, "*");
         consume(p, TOKEN_STAR);
         if (p->current.type == TOKEN_MUT) {
-            strcat(buf, "mut ");
             consume(p, TOKEN_MUT);
-        } else if (strcmp(p->current.text, "const") == 0) {
-            strcat(buf, "const ");
-            consume(p, TOKEN_IDENT);
+        } else if (p->current.type == TOKEN_CONST) {
+            consume(p, TOKEN_CONST);
         }
         char *inner = parse_type(p);
-        strcat(buf, inner);
+        sprintf(buf, "%s*", inner);
         free(inner);
     } else if (p->current.type == TOKEN_AMP) {
         strcat(buf, "&");
@@ -396,16 +417,34 @@ static ASTNode *parse_pattern(Parser *p) {
 ASTNode *parse_expression(Parser *p);
 
 static ASTNode *parse_primary(Parser *p, int allow_struct_init) {
-    if (p->current.type == TOKEN_STAR || p->current.type == TOKEN_AMP) {
+    if (p->current.type == TOKEN_UNSAFE) {
+        consume(p, TOKEN_UNSAFE);
+        return parse_primary(p, allow_struct_init); // Skip unsafe in expressions too
+    }
+
+    if (p->current.type == TOKEN_STAR) {
+         // Check if this is a dereference or multiplication
+         // In parse_primary, it's almost always a dereference unless it's a binary op, 
+         // which is handled by parse_expression_precedence.
+         const char *op = "*";
+         consume(p, TOKEN_STAR);
+         ASTNode *expr = parse_primary(p, allow_struct_init);
+         ASTNode *node = ast_new(AST_UNOP);
+         node->data.unop.op = strdup(op);
+         node->data.unop.expr = expr;
+         return node;
+    }
+
+    if (p->current.type == TOKEN_AMP) {
         char buf[32] = {0};
         strcat(buf, p->current.text);
-        consume(p, p->current.type);
+        consume(p, TOKEN_AMP);
         if (p->current.type == TOKEN_MUT) {
             strcat(buf, "mut ");
             consume(p, TOKEN_MUT);
         }
         char *op = strdup(buf);
-        ASTNode *expr = parse_primary(p, allow_struct_init); // Unary operators have high precedence
+        ASTNode *expr = parse_primary(p, allow_struct_init); 
         ASTNode *node = ast_new(AST_UNOP);
         node->data.unop.op = op;
         node->data.unop.expr = expr;
@@ -724,9 +763,24 @@ static int get_precedence(TokenType type) {
 }
 
 static ASTNode *parse_expression_precedence(Parser *p, int min_precedence, int allow_struct_init) {
+    if (p->current.type == TOKEN_STAR && p->next.type != TOKEN_IDENT && p->next.type != TOKEN_LPAREN && p->next.type != TOKEN_LBRACE && p->next.type != TOKEN_LBRACKET) {
+         // Heuristic: unary * (deref) has higher precedence than BINOP * (mul)
+         // but let's handle it in parse_primary.
+    }
+    
     ASTNode *left = parse_primary(p, allow_struct_init);
 
     while (1) {
+        if (p->current.type == TOKEN_AS) {
+            consume(p, TOKEN_AS);
+            char *type_name = parse_type(p);
+            ASTNode *node = ast_new(AST_CAST);
+            node->data.cast.expr = left;
+            node->data.cast.type_name = type_name;
+            left = node;
+            continue;
+        }
+
         int precedence = get_precedence(p->current.type);
         if (precedence == 0 || precedence < min_precedence) {
             break;
@@ -793,7 +847,10 @@ static ASTNode *parse_primary(Parser *p, int allow_struct_init);
 ASTNode *parse_statement(Parser *p) {
     if (p->current.type == TOKEN_UNSAFE) {
         consume(p, TOKEN_UNSAFE);
-        return parse_statement(p);
+        ASTNode *stmt = parse_statement(p);
+        // Maybe wrap in a special UNSAFE node if needed, 
+        // but for now let's just mark the block or statement if we had a flag.
+        return stmt;
     }
     
     if (p->current.type == TOKEN_IF || p->current.type == TOKEN_WHILE || p->current.type == TOKEN_MATCH || p->current.type == TOKEN_LBRACE) {

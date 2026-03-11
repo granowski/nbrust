@@ -37,11 +37,14 @@ typedef enum {
     AST_MACRO_RULES,
     AST_TYPE_ALIAS,
     AST_CONST,
-    AST_TRAIT_IMPL
+    AST_TRAIT_IMPL,
+    AST_CAST
 } ASTNodeType;
 
 typedef struct ASTNode {
     ASTNodeType type;
+    int line;
+    int col;
     union {
         struct {
             char *name;
@@ -205,10 +208,16 @@ typedef struct ASTNode {
             char *type_name;
             struct ASTNode *value;
         } const_decl;
+        struct {
+            struct ASTNode *expr;
+            char *type_name;
+        } cast;
     } data;
 } ASTNode;
 
-ASTNode *ast_new(ASTNodeType type);
+ASTNode *ast_new_at(ASTNodeType type, int line, int col);
+ASTNode *ast_new_old(ASTNodeType type);
+#define ast_new(type) ast_new_old(type)
 void ast_free(ASTNode *node);
 
 #endif

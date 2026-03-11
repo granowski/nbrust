@@ -37,13 +37,19 @@ static void check_node(ASTNode *node) {
     
     switch (node->type) {
         case AST_VAR_DECL:
+            if (node->data.var_decl.init && node->data.var_decl.init->type == AST_IDENT) {
+                VarState *v = find_var(node->data.var_decl.init->data.ident.name);
+                if (v && !v->borrow_count && !v->is_mut_borrowed) {
+                    v->is_moved = 1;
+                }
+            }
             push_var(node->data.var_decl.name);
             check_node(node->data.var_decl.init);
             break;
         case AST_IDENT: {
             VarState *v = find_var(node->data.ident.name);
             if (v && v->is_moved) {
-                fprintf(stderr, "Borrow check error: use of moved value '%s'\n", v->name);
+                fprintf(stderr, "Borrow check error at %d:%d: use of moved value '%s'\n", node->line, node->col, v->name);
             }
             break;
         }
@@ -58,7 +64,7 @@ static void check_node(ASTNode *node) {
                      VarState *v = find_var(node->data.unop.expr->data.ident.name);
                      if (v) {
                          if (v->borrow_count > 0 || v->is_mut_borrowed) {
-                             fprintf(stderr, "Borrow check error: cannot borrow '%s' as mutable more than once at a time\n", v->name);
+                             fprintf(stderr, "Borrow check error at %d:%d: cannot borrow '%s' as mutable more than once at a time\n", node->line, node->col, v->name);
                          }
                          v->is_mut_borrowed = 1;
                      }
@@ -94,9 +100,9 @@ static void check_node(ASTNode *node) {
                 ASTNode *arg = node->data.call.args[i];
                 if (arg->type == AST_IDENT) {
                     VarState *v = find_var(arg->data.ident.name);
-                    // Simplified move semantics: move if not a primitive (heuristic)
+                    // Move if it's not a reference (simple heuristic)
                     if (v && !v->borrow_count && !v->is_mut_borrowed) {
-                        // v->is_moved = 1; 
+                         v->is_moved = 1;
                     }
                 }
                 check_node(arg);
@@ -112,13 +118,25 @@ static void check_node(ASTNode *node) {
             check_node(node->data.while_loop.body);
             break;
         case AST_BINOP:
+            if (strcmp(node->data.binop.op, "=") == 0 && node->data.binop.right->type == AST_IDENT) {
+                VarState *v = find_var(node->data.binop.right->data.ident.name);
+                if (v && !v->borrow_count && !v->is_mut_borrowed) {
+                    v->is_moved = 1;
+                }
+            }
             check_node(node->data.binop.left);
             check_node(node->data.binop.right);
             break;
-        case AST_MATCH:
-            check_node(node->data.match_stmt.expr);
-            for (int i = 0; i < node->data.match_stmt.arm_count; i++) {
-                check_node(node->data.match_stmt.arms[i]->data.match_arm.body);
+        case AST_MACRO_CALL:
+            for (int i = 0; i < node->data.macro_call.arg_count; i++) {
+                ASTNode *arg = node->data.macro_call.args[i];
+                if (arg->type == AST_IDENT) {
+                    VarState *v = find_var(arg->data.ident.name);
+                    if (v && v->is_moved) {
+                        fprintf(stderr, "Borrow check error at %d:%d: use of moved value '%s' in macro\n", node->line, node->col, v->name);
+                    }
+                }
+                check_node(arg);
             }
             break;
         case AST_MOD:
