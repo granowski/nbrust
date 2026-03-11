@@ -59,13 +59,23 @@ Token lexer_next_token(Lexer *l) {
         advance(l); // Skip opening quote
         int start = l->pos;
         while (peek(l) != '"' && peek(l) != '\0') {
-            advance(l);
+            if (peek(l) == '\\') {
+                advance(l); // Skip backslash
+                if (peek(l) != '\0') advance(l); // Skip escaped char
+            } else {
+                advance(l);
+            }
         }
         int len = l->pos - start;
         char *text = malloc(len + 1);
         strncpy(text, l->source + start, len);
         text[len] = '\0';
         if (peek(l) == '"') advance(l); // Skip closing quote
+        
+        // Unescape internal quotes for the internal representation if needed, 
+        // but for now we keep the raw content between quotes.
+        // Actually, codegen expects raw content and wraps it in quotes.
+        
         Token t = make_token(TOKEN_STRING, text, line, col);
         free(text);
         return t;
