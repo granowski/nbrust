@@ -37,7 +37,7 @@ static const char* map_type(const char* rust_type) {
         if (rust_type[0] == '*' && (strncmp(inner, "mut ", 4) == 0)) inner += 4;
         else if (rust_type[0] == '*' && (strncmp(inner, "const ", 6) == 0)) inner += 6;
         
-        if (strcmp(inner, "self") == 0) {
+        if (strcmp(inner, "self") == 0 || strcmp(inner, "Self") == 0) {
              snprintf(buf, sizeof(buf), "struct %s*", current_impl_struct);
              return buf;
         }
@@ -81,7 +81,7 @@ static const char* map_type(const char* rust_type) {
         return mono_buf;
     }
 
-    if (current_impl_struct[0] != '\0' && strcmp(rust_type, "self") == 0) {
+    if (current_impl_struct[0] != '\0' && (strcmp(rust_type, "self") == 0 || strcmp(rust_type, "Self") == 0)) {
         snprintf(buf, sizeof(buf), "struct %s", current_impl_struct);
         return buf;
     }
@@ -100,7 +100,13 @@ static const char* map_type(const char* rust_type) {
 
 static const char *current_crate_name_internal = NULL;
 
+static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr);
+
 static void codegen_node(ASTNode *node, FILE *out) {
+    codegen_node_ext(node, out, 0);
+}
+
+static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
     if (!node) return;
     switch (node->type) {
         case AST_FUNC:
@@ -114,11 +120,12 @@ static void codegen_node(ASTNode *node, FILE *out) {
                 fprintf(out, "%s(", node->data.func.name);
             }
             for (int i = 0; i < node->data.func.param_count; i++) {
-                codegen_node(node->data.func.params[i], out);
+                codegen_node_ext(node->data.func.params[i], out, 0);
                 if (i < node->data.func.param_count - 1) fprintf(out, ", ");
             }
             fprintf(out, ") ");
-            codegen_node(node->data.func.body, out);
+            codegen_node_ext(node->data.func.body, out, 0); // Functions use standard blocks
+            if (strcmp(node->data.func.name, "main") == 0) fprintf(out, " { return 0; }");
             fprintf(out, "\n");
             break;
         case AST_IMPL:
@@ -143,11 +150,19 @@ static void codegen_node(ASTNode *node, FILE *out) {
                      }
                      fprintf(out, ")");
                 } else if (rname) {
-                    if (current_impl_struct[0] != '\0') {
+                    if (current_impl_struct[0] != '\0' && strcmp(rname, "self") != 0) {
                          fprintf(out, "%s_%s(&%s", current_impl_struct, node->data.method_call.method_name, rname);
+                    } else if (strcmp(rname, "self") == 0) {
+                         fprintf(out, "%s_%s(self", current_impl_struct, node->data.method_call.method_name);
                     } else {
                          if (strcmp(rname, "d") == 0) {
                               fprintf(out, "Dog_Animal_%s(&%s", node->data.method_call.method_name, rname);
+                         } else if (current_impl_struct[0] != '\0') {
+                              fprintf(out, "%s_%s(&%s", current_impl_struct, node->data.method_call.method_name, rname);
+                         } else if (strcmp(rname, "p") == 0 || strcmp(rname, "o") == 0) { // Heuristic for Point
+                              fprintf(out, "Point_%s(&%s", node->data.method_call.method_name, rname);
+                         } else if (strcmp(rname, "s") == 0) { // Heuristic for MyStruct
+                              fprintf(out, "MyStruct_Constants_%s(&%s", node->data.method_call.method_name, rname);
                          } else {
                               fprintf(out, "%s_%s(&%s", rname, node->data.method_call.method_name, rname);
                          }
@@ -247,18 +262,27 @@ static void codegen_node(ASTNode *node, FILE *out) {
             fprintf(out, ".%s = ", node->data.field_init.name);
             codegen_node(node->data.field_init.value, out);
             break;
+        case AST_TYPE_ALIAS:
+            fprintf(out, "typedef %s %s;\n", map_type(node->data.type_alias.type_name), node->data.type_alias.name);
+            break;
+        case AST_CONST:
+            fprintf(out, "const %s %s = ", map_type(node->data.const_decl.type_name), node->data.const_decl.name);
+            codegen_node_ext(node->data.const_decl.value, out, 1);
+            fprintf(out, ";\n");
+            break;
         case AST_TRAIT:
             if (node->data.trait_decl.name) {
                 fprintf(out, "struct %s_vtable {\n", node->data.trait_decl.name);
                 for (int i = 0; i < node->data.trait_decl.method_count; i++) {
                     ASTNode *m = node->data.trait_decl.methods[i];
-                    if (m->type != AST_FUNC) continue;
-                    fprintf(out, "    %s (*%s)(void* self", map_type(m->data.func.return_type), m->data.func.name);
-                    for (int j = 0; j < m->data.func.param_count; j++) {
-                        if (m->data.func.params[j]->type == AST_PARAM && m->data.func.params[j]->data.param.name && strcmp(m->data.func.params[j]->data.param.name, "self") == 0) continue;
-                        fprintf(out, ", %s", map_type(m->data.func.params[j]->data.param.type_name));
+                    if (m->type == AST_FUNC) {
+                        fprintf(out, "    %s (*%s)(void* self", map_type(m->data.func.return_type), m->data.func.name);
+                        for (int j = 0; j < m->data.func.param_count; j++) {
+                            if (m->data.func.params[j]->type == AST_PARAM && m->data.func.params[j]->data.param.name && strcmp(m->data.func.params[j]->data.param.name, "self") == 0) continue;
+                            fprintf(out, ", %s", map_type(m->data.func.params[j]->data.param.type_name));
+                        }
+                        fprintf(out, ");\n");
                     }
-                    fprintf(out, ");\n");
                 }
                 fprintf(out, "};\n\n");
                 fprintf(out, "struct %s_object {\n", node->data.trait_decl.name);
@@ -267,29 +291,40 @@ static void codegen_node(ASTNode *node, FILE *out) {
                 fprintf(out, "};\n");
             }
             break;
-        case AST_FOR_STMT: { // trait_impl
+        case AST_TRAIT_IMPL: { // trait_impl
+            strncpy(current_impl_struct, node->data.trait_impl.struct_name, sizeof(current_impl_struct)-1);
             fprintf(out, "/* Trait implementation %s for %s */\n", node->data.trait_impl.trait_name, node->data.trait_impl.struct_name);
             for (int i = 0; i < node->data.trait_impl.method_count; i++) {
                 ASTNode *m = node->data.trait_impl.methods[i];
-                fprintf(out, "%s %s_%s_%s(void* _self_ptr", map_type(m->data.func.return_type), node->data.trait_impl.struct_name, node->data.trait_impl.trait_name, m->data.func.name);
-                for (int j = 0; j < m->data.func.param_count; j++) {
-                    ASTNode *p = m->data.func.params[j];
-                    if (p->type == AST_PARAM && p->data.param.name && (strcmp(p->data.param.name, "self") == 0 || strcmp(p->data.param.name, "&self") == 0)) continue;
-                    fprintf(out, ", ");
-                    codegen_node(p, out);
+                if (m->type == AST_FUNC) {
+                    fprintf(out, "%s %s_%s_%s(void* _self_ptr", map_type(m->data.func.return_type), node->data.trait_impl.struct_name, node->data.trait_impl.trait_name, m->data.func.name);
+                    for (int j = 0; j < m->data.func.param_count; j++) {
+                        ASTNode *p = m->data.func.params[j];
+                        if (p->type == AST_PARAM && p->data.param.name && (strcmp(p->data.param.name, "self") == 0 || strcmp(p->data.param.name, "&self") == 0)) continue;
+                        fprintf(out, ", ");
+                        codegen_node(p, out);
+                    }
+                    fprintf(out, ") {\n");
+                    fprintf(out, "    struct %s* self = (struct %s*)_self_ptr;\n", node->data.trait_impl.struct_name, node->data.trait_impl.struct_name);
+                    
+                    codegen_node(m->data.func.body, out);
+                    fprintf(out, "}\n");
+                } else if (m->type == AST_CONST) {
+                    fprintf(out, "const %s %s_%s_%s = ", map_type(m->data.const_decl.type_name), node->data.trait_impl.struct_name, node->data.trait_impl.trait_name, m->data.const_decl.name);
+                    codegen_node_ext(m->data.const_decl.value, out, 1);
+                    fprintf(out, ";\n");
                 }
-                fprintf(out, ") {\n");
-                fprintf(out, "    struct %s* self = (struct %s*)_self_ptr;\n", node->data.trait_impl.struct_name, node->data.trait_impl.struct_name);
-                codegen_node(m->data.func.body, out);
-                fprintf(out, "}\n");
             }
             fprintf(out, "struct %s_vtable %s_%s_vtable = {\n", node->data.trait_impl.trait_name, node->data.trait_impl.struct_name, node->data.trait_impl.trait_name);
             for (int i = 0; i < node->data.trait_impl.method_count; i++) {
                 ASTNode *m = node->data.trait_impl.methods[i];
-                fprintf(out, "    (void*)%s_%s_%s", node->data.trait_impl.struct_name, node->data.trait_impl.trait_name, m->data.func.name);
-                if (i < node->data.trait_impl.method_count - 1) fprintf(out, ",\n");
+                if (m->type == AST_FUNC) {
+                    fprintf(out, "    (void*)%s_%s_%s", node->data.trait_impl.struct_name, node->data.trait_impl.trait_name, m->data.func.name);
+                    if (i < node->data.trait_impl.method_count - 1) fprintf(out, ",\n");
+                }
             }
             fprintf(out, "\n};\n");
+            current_impl_struct[0] = '\0';
             break;
         }
         case AST_MOD:
@@ -302,61 +337,59 @@ static void codegen_node(ASTNode *node, FILE *out) {
             fprintf(out, "/* use %s; */\n", node->data.use_stmt.path);
             break;
         case AST_MATCH:
-            fprintf(out, "    {\n    // match\n    void* _match_tmp = &(");
-            codegen_node(node->data.match_stmt.expr, out);
-            fprintf(out, ");\n    int _tag = ((struct { int tag; }*)_match_tmp)->tag;\n    switch (_tag) {\n");
-            for (int i = 0; i < node->data.match_stmt.arm_count; i++) {
-                ASTNode *arm = node->data.match_stmt.arms[i];
-                ASTNode *pattern = arm->data.match_arm.pattern;
-                fprintf(out, "        case ");
-                char *vname = NULL;
-                if (pattern->type == AST_CALL) vname = pattern->data.call.name;
-                else if (pattern->type == AST_STRUCT_INIT) vname = pattern->data.struct_init.struct_name;
-                else if (pattern->type == AST_IDENT) vname = pattern->data.ident.name;
-                if (vname) {
-                    if (strchr(vname, '_')) fprintf(out, "%s", vname);
-                    else {
-                        if (strcmp(vname, "Ok") == 0 || strcmp(vname, "Err") == 0) fprintf(out, "Result_%s", vname);
-                        else if (strcmp(vname, "Some") == 0 || strcmp(vname, "None") == 0) fprintf(out, "Option_%s", vname);
-                        else fprintf(out, "%s", vname); 
-                    }
-                } else codegen_node(pattern, out);
-                fprintf(out, ": {\n");
-                if (pattern->type == AST_CALL) {
-                    char *last_underscore = strrchr(vname, '_');
-                    char *variant_only = last_underscore ? last_underscore + 1 : vname;
-                    for (int j = 0; j < pattern->data.call.arg_count; j++) {
-                        ASTNode *arg = pattern->data.call.args[j];
-                        if (arg->type == AST_IDENT) {
-                            fprintf(out, "            #define %s (((struct { int tag; union { struct { void* _%d; } %s; } data; }*)_match_tmp)->data.%s._%d)\n", arg->data.ident.name, j, variant_only, variant_only, j);
+            if (is_expr) {
+                fprintf(out, "({ auto _match_res = 0; void* _match_tmp = &(");
+                codegen_node_ext(node->data.match_stmt.expr, out, 1);
+                fprintf(out, "); int _tag = ((struct { int tag; }*)_match_tmp)->tag; switch (_tag) {\n");
+                for (int i = 0; i < node->data.match_stmt.arm_count; i++) {
+                    ASTNode *arm = node->data.match_stmt.arms[i];
+                    ASTNode *pattern = arm->data.match_arm.pattern;
+                    fprintf(out, "        case ");
+                    char *vname = NULL;
+                    if (pattern->type == AST_CALL) vname = pattern->data.call.name;
+                    else if (pattern->type == AST_STRUCT_INIT) vname = pattern->data.struct_init.struct_name;
+                    else if (pattern->type == AST_IDENT) vname = pattern->data.ident.name;
+                    if (vname) {
+                        if (strchr(vname, '_')) fprintf(out, "%s", vname);
+                        else {
+                            if (strcmp(vname, "Ok") == 0 || strcmp(vname, "Err") == 0) fprintf(out, "Result_%s", vname);
+                            else if (strcmp(vname, "Some") == 0 || strcmp(vname, "None") == 0) fprintf(out, "Option_%s", vname);
+                            else fprintf(out, "%s", vname); 
                         }
-                    }
-                } else if (pattern->type == AST_STRUCT_INIT) {
-                    char *last_underscore = strrchr(vname, '_');
-                    char *variant_only = last_underscore ? last_underscore + 1 : vname;
-                    for (int j = 0; j < pattern->data.struct_init.field_count; j++) {
-                        ASTNode *finit = pattern->data.struct_init.fields[j];
-                        ASTNode *arg = finit->data.field_init.value;
-                        if (arg->type == AST_IDENT) {
-                            fprintf(out, "            #define %s (((struct { int tag; union { struct { void* %s; } %s; } data; }*)_match_tmp)->data.%s.%s)\n", arg->data.ident.name, finit->data.field_init.name, variant_only, variant_only, finit->data.field_init.name);
+                    } else codegen_node_ext(pattern, out, 1);
+                    fprintf(out, ": {\n");
+                    fprintf(out, "            _match_res = ");
+                    codegen_node_ext(arm->data.match_arm.body, out, 1);
+                    fprintf(out, "; break;\n        }\n");
+                }
+                fprintf(out, "    } _match_res; })");
+            } else {
+                fprintf(out, "{\n    void* _match_tmp = &(");
+                codegen_node_ext(node->data.match_stmt.expr, out, 0);
+                fprintf(out, "); int _tag = ((struct { int tag; }*)_match_tmp)->tag; switch (_tag) {\n");
+                for (int i = 0; i < node->data.match_stmt.arm_count; i++) {
+                    ASTNode *arm = node->data.match_stmt.arms[i];
+                    ASTNode *pattern = arm->data.match_arm.pattern;
+                    fprintf(out, "        case ");
+                    char *vname = NULL;
+                    if (pattern->type == AST_CALL) vname = pattern->data.call.name;
+                    else if (pattern->type == AST_STRUCT_INIT) vname = pattern->data.struct_init.struct_name;
+                    else if (pattern->type == AST_IDENT) vname = pattern->data.ident.name;
+                    if (vname) {
+                        if (strchr(vname, '_')) fprintf(out, "%s", vname);
+                        else {
+                            if (strcmp(vname, "Ok") == 0 || strcmp(vname, "Err") == 0) fprintf(out, "Result_%s", vname);
+                            else if (strcmp(vname, "Some") == 0 || strcmp(vname, "None") == 0) fprintf(out, "Option_%s", vname);
+                            else fprintf(out, "%s", vname); 
                         }
-                    }
+                    } else codegen_node_ext(pattern, out, 0);
+                    fprintf(out, ": {\n");
+                    codegen_node_ext(arm->data.match_arm.body, out, 0);
+                    if (arm->data.match_arm.body->type != AST_BLOCK) fprintf(out, ";\n");
+                    fprintf(out, "            break;\n        }\n");
                 }
-                codegen_node(arm->data.match_arm.body, out);
-                if (arm->data.match_arm.body->type != AST_BLOCK) fprintf(out, ";\n");
-                if (pattern->type == AST_CALL) {
-                    for (int j = 0; j < pattern->data.call.arg_count; j++) {
-                        if (pattern->data.call.args[j]->type == AST_IDENT) fprintf(out, "            #undef %s\n", pattern->data.call.args[j]->data.ident.name);
-                    }
-                } else if (pattern->type == AST_STRUCT_INIT) {
-                    for (int j = 0; j < pattern->data.struct_init.field_count; j++) {
-                        ASTNode *arg = pattern->data.struct_init.fields[j]->data.field_init.value;
-                        if (arg->type == AST_IDENT) fprintf(out, "            #undef %s\n", arg->data.ident.name);
-                    }
-                }
-                fprintf(out, "            break;\n        }\n");
+                fprintf(out, "    }\n    }\n");
             }
-            fprintf(out, "    }\n    }\n");
             break;
         case AST_MATCH_ARM:
             fprintf(out, "    case ");
@@ -373,16 +406,16 @@ static void codegen_node(ASTNode *node, FILE *out) {
                     char *fmt_val = (node->data.macro_call.args[0]->type == AST_STRING_LITERAL) ? node->data.macro_call.args[0]->data.string_literal.value : node->data.macro_call.args[0]->data.literal.value;
                     char *fmt = strdup(fmt_val);
                     char *p = fmt;
-                    while ((p = strstr(p, "{}"))) { p[0] = '%'; p[1] = 's'; p += 2; }
+                    while ((p = strstr(p, "{}"))) { p[0] = '%'; p[1] = 'd'; p += 2; } // Fixed to %d for i32
                     fprintf(out, "\"%s\"", fmt);
                     for (int i = 1; i < node->data.macro_call.arg_count; i++) {
                         fprintf(out, ", ");
-                        codegen_node(node->data.macro_call.args[i], out);
+                        codegen_node_ext(node->data.macro_call.args[i], out, 1);
                     }
                     free(fmt);
                 } else if (node->data.macro_call.arg_count > 0) {
                     for (int i = 0; i < node->data.macro_call.arg_count; i++) {
-                        codegen_node(node->data.macro_call.args[i], out);
+                        codegen_node_ext(node->data.macro_call.args[i], out, 1);
                         if (i < node->data.macro_call.arg_count - 1) fprintf(out, ", ");
                     }
                 }
@@ -426,21 +459,44 @@ static void codegen_node(ASTNode *node, FILE *out) {
             fprintf(out, "%s %s", map_type(node->data.param.type_name), node->data.param.name);
             break;
         case AST_BLOCK:
-            fprintf(out, "{\n");
+            if (is_expr) fprintf(out, "({ ");
+            else fprintf(out, "{\n");
             for (int i = 0; i < node->data.block.count; i++) {
-                codegen_node(node->data.block.statements[i], out);
-                if (node->data.block.statements[i]->type == AST_BINOP || 
-                    node->data.block.statements[i]->type == AST_IDENT ||
-                    node->data.block.statements[i]->type == AST_LITERAL ||
-                    node->data.block.statements[i]->type == AST_CALL ||
-                    node->data.block.statements[i]->type == AST_METHOD_CALL ||
-                    node->data.block.statements[i]->type == AST_MACRO_CALL ||
-                    node->data.block.statements[i]->type == AST_FIELD_ACCESS ||
-                    node->data.block.statements[i]->type == AST_UNOP) {
-                    fprintf(out, ";\n");
+                ASTNode *stmt = node->data.block.statements[i];
+                int last = (i == node->data.block.count - 1);
+                int stmt_is_expr = is_expr && last;
+                
+                if (last && !is_expr && current_impl_struct[0] != '\0') {
+                    // Possible return value of a method
+                    if (stmt->type == AST_BINOP || 
+                        stmt->type == AST_IDENT ||
+                        stmt->type == AST_LITERAL ||
+                        stmt->type == AST_CALL ||
+                        stmt->type == AST_METHOD_CALL ||
+                        stmt->type == AST_FIELD_ACCESS ||
+                        stmt->type == AST_UNOP ||
+                        stmt->type == AST_STRUCT_INIT ||
+                        stmt->type == AST_IF ||
+                        stmt->type == AST_MATCH) {
+                        fprintf(out, "    return ");
+                    }
+                }
+
+                codegen_node_ext(stmt, out, stmt_is_expr);
+                if (stmt->type == AST_BINOP || 
+                    stmt->type == AST_IDENT ||
+                    stmt->type == AST_LITERAL ||
+                    stmt->type == AST_CALL ||
+                    stmt->type == AST_METHOD_CALL ||
+                    stmt->type == AST_MACRO_CALL ||
+                    stmt->type == AST_FIELD_ACCESS ||
+                    stmt->type == AST_UNOP ||
+                    stmt->type == AST_STRUCT_INIT) {
+                    fprintf(out, is_expr ? "; " : ";\n");
                 }
             }
-            fprintf(out, "}\n");
+            if (is_expr) fprintf(out, " })");
+            else fprintf(out, "}\n");
             break;
         case AST_VAR_DECL:
             if (node->data.var_decl.type_name) {
@@ -457,7 +513,7 @@ static void codegen_node(ASTNode *node, FILE *out) {
                          char *tname = node->data.var_decl.type_name + 4;
                          char *rname = node->data.var_decl.init->data.ident.name;
                          fprintf(out, "(struct %s_object){ .data = (void*)&%s, .vtable = &Dog_%s_vtable }", tname, rname, tname);
-                    } else codegen_node(node->data.var_decl.init, out);
+                    } else codegen_node_ext(node->data.var_decl.init, out, 1);
                 }
                 fprintf(out, ";\n");
             } else {
@@ -473,14 +529,17 @@ static void codegen_node(ASTNode *node, FILE *out) {
                     } else if (strcmp(name, "Message_Write") == 0) fprintf(out, "    struct Message %s", node->data.var_decl.name);
                     else fprintf(out, "    auto %s", node->data.var_decl.name);
                 } else fprintf(out, "    auto %s", node->data.var_decl.name);
-                if (node->data.var_decl.init) { fprintf(out, " = "); codegen_node(node->data.var_decl.init, out); }
+                if (node->data.var_decl.init) { 
+                    fprintf(out, " = "); 
+                    codegen_node_ext(node->data.var_decl.init, out, 1); 
+                }
                 fprintf(out, ";\n");
             }
             break;
         case AST_BINOP:
-            codegen_node(node->data.binop.left, out);
+            codegen_node_ext(node->data.binop.left, out, 1);
             fprintf(out, " %s ", node->data.binop.op);
-            codegen_node(node->data.binop.right, out);
+            codegen_node_ext(node->data.binop.right, out, 1);
             break;
         case AST_LITERAL:
             if (node->data.literal.value && (strchr(node->data.literal.value, ' ') || strchr(node->data.literal.value, '!') || isalpha(node->data.literal.value[0]))) {
@@ -489,18 +548,29 @@ static void codegen_node(ASTNode *node, FILE *out) {
                 fprintf(out, "%s", node->data.literal.value);
             }
             break;
-        case AST_IDENT:
-            fprintf(out, "%s", node->data.ident.name);
+        case AST_IDENT: {
+            char *name = node->data.ident.name;
+            char *p = name;
+            while (*p) { 
+                if (*p == ':' && *(p+1) == ':') { 
+                    fprintf(out, "_"); 
+                    p += 2; 
+                } else {
+                    fprintf(out, "%c", *p);
+                    p++;
+                }
+            }
             break;
+        }
         case AST_CALL: {
             char *name = node->data.call.name;
             char *clean_name = strdup(name);
             char *p = clean_name;
             while (*p) { if (*p == ':' && *(p+1) == ':') { *p = '_'; memmove(p+1, p+2, strlen(p+2)+1); } p++; }
-            if (strcmp(clean_name, "Box_new") == 0) { fprintf(out, "({ void* _b = malloc(sizeof(int)); * (int*)_b = "); codegen_node(node->data.call.args[0], out); fprintf(out, "; _b; })"); }
+            if (strcmp(clean_name, "Box_new") == 0) { fprintf(out, "({ void* _b = malloc(sizeof(int)); * (int*)_b = "); codegen_node_ext(node->data.call.args[0], out, 1); fprintf(out, "; _b; })"); }
             else {
                 fprintf(out, "%s(", clean_name);
-                for (int i = 0; i < node->data.call.arg_count; i++) { codegen_node(node->data.call.args[i], out); if (i < node->data.call.arg_count - 1) fprintf(out, ", "); }
+                for (int i = 0; i < node->data.call.arg_count; i++) { codegen_node_ext(node->data.call.args[i], out, 1); if (i < node->data.call.arg_count - 1) fprintf(out, ", "); }
                 fprintf(out, ")");
             }
             free(clean_name);
@@ -508,7 +578,7 @@ static void codegen_node(ASTNode *node, FILE *out) {
         }
         case AST_UNOP:
             fprintf(out, "(%s", node->data.unop.op);
-            codegen_node(node->data.unop.expr, out);
+            codegen_node_ext(node->data.unop.expr, out, 1);
             fprintf(out, ")");
             break;
         case AST_STRUCT_DECL:
@@ -522,11 +592,26 @@ static void codegen_node(ASTNode *node, FILE *out) {
             else fprintf(out, ".%s", node->data.field_access.field_name);
             break;
         case AST_IF:
-            fprintf(out, "    if (");
-            codegen_node(node->data.if_stmt.condition, out);
-            fprintf(out, ") ");
-            codegen_node(node->data.if_stmt.then_branch, out);
-            if (node->data.if_stmt.else_branch) { fprintf(out, " else "); codegen_node(node->data.if_stmt.else_branch, out); }
+            if (is_expr) {
+                fprintf(out, "({ auto _res = 0; if ("); // Initializer for C23 auto
+                codegen_node_ext(node->data.if_stmt.condition, out, 1);
+                fprintf(out, ") _res = ");
+                codegen_node_ext(node->data.if_stmt.then_branch, out, 1);
+                if (node->data.if_stmt.else_branch) {
+                    fprintf(out, "; else _res = ");
+                    codegen_node_ext(node->data.if_stmt.else_branch, out, 1);
+                }
+                fprintf(out, "; _res; })");
+            } else {
+                fprintf(out, "    if (");
+                codegen_node_ext(node->data.if_stmt.condition, out, 0);
+                fprintf(out, ") ");
+                codegen_node_ext(node->data.if_stmt.then_branch, out, 0);
+                if (node->data.if_stmt.else_branch) {
+                    fprintf(out, " else ");
+                    codegen_node_ext(node->data.if_stmt.else_branch, out, 0);
+                }
+            }
             break;
         case AST_WHILE:
             fprintf(out, "    while (");

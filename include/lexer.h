@@ -60,6 +60,10 @@ typedef enum {
     TOKEN_UNDERSCORE,// _
     TOKEN_DYN,
     TOKEN_MACRO_RULES,
+    TOKEN_SELF_UPPER, // Self
+    TOKEN_TYPE,       // type
+    TOKEN_CONST,      // const
+    TOKEN_AS,         // as
     TOKEN_EOF,
     TOKEN_UNKNOWN
 } TokenType;

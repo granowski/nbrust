@@ -117,6 +117,10 @@ Token lexer_next_token(Lexer *l) {
         else if (strcmp(text, "unsafe") == 0) type = TOKEN_UNSAFE;
         else if (strcmp(text, "dyn") == 0) type = TOKEN_DYN;
         else if (strcmp(text, "macro_rules") == 0) type = TOKEN_MACRO_RULES;
+        else if (strcmp(text, "Self") == 0) type = TOKEN_SELF_UPPER;
+        else if (strcmp(text, "type") == 0) type = TOKEN_TYPE;
+        else if (strcmp(text, "const") == 0) type = TOKEN_CONST;
+        else if (strcmp(text, "as") == 0) type = TOKEN_AS;
         else if (strcmp(text, "_") == 0) type = TOKEN_UNDERSCORE;
 
         Token t = make_token(type, text, line, col);

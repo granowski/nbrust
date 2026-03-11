@@ -153,6 +153,13 @@ static void process_file(const char *path, Target target) {
 
     Parser p;
     parser_init(&p, &l);
+    
+    // Check if we should auto-include prelude
+    static int prelude_included = 0;
+    if (!prelude_included && strstr(path, "std/") == NULL && !strstr(path, "prelude.rs")) {
+         prelude_included = 1;
+         // process_file("std/src/prelude.rs", target); 
+    }
 
     while (p.current.type != TOKEN_EOF) {
         if (p.current.type == TOKEN_PUB) {
@@ -189,6 +196,10 @@ static void process_file(const char *path, Target target) {
             }
         } else if (p.current.type == TOKEN_ENUM) {
             ast = parse_enum(&p);
+        } else if (p.current.type == TOKEN_TYPE) {
+            ast = parse_type_alias(&p);
+        } else if (p.current.type == TOKEN_CONST) {
+            ast = parse_const(&p);
         } else if (p.current.type == TOKEN_MACRO_RULES) {
             ast = parse_macro_rules(&p);
         } else if (p.current.type == TOKEN_FN) {
@@ -271,6 +282,9 @@ static void process_file(const char *path, Target target) {
             }
             if (!is_generic) {
                 codegen_generate(ast, stdout, target, current_crate_name);
+                if (ast->type == AST_BINOP || ast->type == AST_IDENT || ast->type == AST_LITERAL || ast->type == AST_CALL || ast->type == AST_METHOD_CALL || ast->type == AST_MACRO_CALL || ast->type == AST_FIELD_ACCESS || ast->type == AST_UNOP || ast->type == AST_IF || ast->type == AST_MATCH || ast->type == AST_BLOCK) {
+                    printf(";\n");
+                }
             }
             ast_free(ast);
         }

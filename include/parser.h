@@ -26,6 +26,8 @@ ASTNode *parse_use(Parser *p);
 ASTNode *parse_extern_block(Parser *p);
 ASTNode *parse_extern_crate(Parser *p);
 ASTNode *parse_macro_rules(Parser *p);
+ASTNode *parse_type_alias(Parser *p);
+ASTNode *parse_const(Parser *p);
 ASTNode *parse_block(Parser *p);
 
 #endif

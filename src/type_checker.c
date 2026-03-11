@@ -48,7 +48,11 @@ static Type *check_node(ASTNode *node) {
         case AST_STRING_LITERAL:
             return type_primitive(PRIM_STR);
         case AST_IDENT: {
-            Symbol *s = symbol_table_lookup(current_table, node->data.ident.name);
+            Symbol *s = symbol_table_lookup_path(current_table, node->data.ident.name);
+            if (!s) {
+                // If not found as a path, try simple lookup (standard behavior for local variables)
+                s = symbol_table_lookup(current_table, node->data.ident.name);
+            }
             if (!s) {
                 fprintf(stderr, "Type error: undefined identifier '%s'\n", node->data.ident.name);
                 return type_new(TYPE_UNKNOWN);
@@ -77,7 +81,7 @@ static Type *check_node(ASTNode *node) {
             symbol_table_insert(current_table, node->data.func.name, func_t);
             
             SymbolTable *old_table = current_table;
-            current_table = symbol_table_new(old_table);
+            current_table = symbol_table_new(old_table, node->data.func.name);
             for (int i = 0; i < node->data.func.param_count; i++) {
                 symbol_table_insert(current_table, node->data.func.params[i]->data.param.name, params[i]);
             }
@@ -86,10 +90,42 @@ static Type *check_node(ASTNode *node) {
             return func_t;
         }
         case AST_BLOCK: {
+            SymbolTable *old_table = current_table;
+            current_table = symbol_table_new(old_table, "block");
+            Type *last_type = type_primitive(PRIM_VOID);
             for (int i = 0; i < node->data.block.count; i++) {
-                check_node(node->data.block.statements[i]);
+                last_type = check_node(node->data.block.statements[i]);
+            }
+            current_table = old_table;
+            return last_type;
+        }
+        case AST_IF: {
+            check_node(node->data.if_stmt.condition);
+            Type *then_t = check_node(node->data.if_stmt.then_branch);
+            if (node->data.if_stmt.else_branch) {
+                Type *else_t = check_node(node->data.if_stmt.else_branch);
+                if (!type_equals(then_t, else_t)) {
+                    fprintf(stderr, "Type error: if/else branches have incompatible types %s and %s\n", 
+                            type_to_string(then_t), type_to_string(else_t));
+                }
+                return then_t;
             }
             return type_primitive(PRIM_VOID);
+        }
+        case AST_WHILE: {
+            check_node(node->data.while_loop.condition);
+            check_node(node->data.while_loop.body);
+            return type_primitive(PRIM_VOID);
+        }
+        case AST_MATCH: {
+            // Type *expr_t = check_node(node->data.match_stmt.expr);
+            check_node(node->data.match_stmt.expr);
+            Type *arm_t = type_primitive(PRIM_VOID);
+            for (int i = 0; i < node->data.match_stmt.arm_count; i++) {
+                ASTNode *arm = node->data.match_stmt.arms[i];
+                arm_t = check_node(arm->data.match_arm.body);
+            }
+            return arm_t;
         }
         case AST_BINOP: {
             Type *left = check_node(node->data.binop.left);
@@ -105,18 +141,15 @@ static Type *check_node(ASTNode *node) {
             return left;
         }
         case AST_CALL: {
-            Symbol *s = symbol_table_lookup(current_table, node->data.call.name);
+            Symbol *s = symbol_table_lookup_path(current_table, node->data.call.name);
+            if (!s) {
+                s = symbol_table_lookup(current_table, node->data.call.name);
+            }
             if (!s || s->type->kind != TYPE_FUNCTION) {
                 // Heuristic for built-in or unknown functions
                 return type_primitive(PRIM_I32);
             }
             return s->type->data.function.return_type;
-        }
-        case AST_IF: {
-            check_node(node->data.if_stmt.condition);
-            check_node(node->data.if_stmt.then_branch);
-            if (node->data.if_stmt.else_branch) check_node(node->data.if_stmt.else_branch);
-            return type_primitive(PRIM_VOID);
         }
         case AST_RETURN: {
             if (node->data.ret_stmt.value) return check_node(node->data.ret_stmt.value);
@@ -150,12 +183,43 @@ static Type *check_node(ASTNode *node) {
             }
             return check_node(node->data.unop.expr);
         }
+        case AST_MOD: {
+            SymbolTable *old_table = current_table;
+            SymbolTable *mod_table = symbol_table_new(old_table, node->data.module.name);
+            symbol_table_insert_scope(old_table, node->data.module.name, mod_table);
+            
+            if (node->data.module.body) {
+                current_table = mod_table;
+                check_node(node->data.module.body);
+                current_table = old_table;
+            }
+            return type_primitive(PRIM_VOID);
+        }
+        case AST_USE: {
+            // For now, we don't fully resolve 'use' but we could record it in the current scope
+            // Simplified: if it's use a::b::c; we might want to make 'c' available locally.
+            char *last_part = strrchr(node->data.use_stmt.path, ':');
+            if (last_part && last_part > node->data.use_stmt.path && *(last_part-1) == ':') {
+                last_part++; // Skip ':'
+                Symbol *s = symbol_table_lookup_path(current_table, node->data.use_stmt.path);
+                if (s) {
+                    if (s->scope) {
+                        symbol_table_insert_scope(current_table, last_part, s->scope);
+                    } else if (s->type) {
+                        symbol_table_insert(current_table, last_part, s->type);
+                    }
+                }
+            }
+            return type_primitive(PRIM_VOID);
+        }
         default:
             return type_primitive(PRIM_VOID);
     }
 }
 
 void type_checker_run(ASTNode *root) {
-    current_table = symbol_table_new(NULL);
+    if (!current_table) {
+        current_table = symbol_table_new(NULL, "crate");
+    }
     check_node(root);
 }

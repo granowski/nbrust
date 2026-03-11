@@ -34,7 +34,10 @@ typedef enum {
     AST_USE,
     AST_EXTERN_BLOCK,
     AST_EXTERN_CRATE,
-    AST_MACRO_RULES
+    AST_MACRO_RULES,
+    AST_TYPE_ALIAS,
+    AST_CONST,
+    AST_TRAIT_IMPL
 } ASTNodeType;
 
 typedef struct ASTNode {
@@ -193,6 +196,15 @@ typedef struct ASTNode {
             char *name;
             char *body_text;
         } macro_rules;
+        struct {
+            char *name;
+            char *type_name;
+        } type_alias;
+        struct {
+            char *name;
+            char *type_name;
+            struct ASTNode *value;
+        } const_decl;
     } data;
 } ASTNode;
 

@@ -208,7 +208,7 @@ void real_consume(Parser *p, TokenType type, int call_line, const char *type_nam
         p->current = p->next;
         p->next = lexer_next_token(p->lexer);
     } else {
-        printf("Unexpected token %s (type %d), expected %s (%d) at line %d (called from %d)\n", 
+        fprintf(stderr, "Unexpected token %s (type %d), expected %s (%d) at line %d (called from %d)\n", 
                p->current.text, p->current.type, type_name, type, p->current.line, call_line);
         exit(1);
     }
@@ -303,6 +303,9 @@ static char *parse_type(Parser *p) {
     } else if (p->current.type == TOKEN_SELF_LOWER) {
         strcat(buf, "self");
         consume(p, TOKEN_SELF_LOWER);
+    } else if (p->current.type == TOKEN_SELF_UPPER) {
+        strcat(buf, "Self");
+        consume(p, TOKEN_SELF_UPPER);
     }
     return strdup(buf);
 }
@@ -414,15 +417,18 @@ static ASTNode *parse_primary(Parser *p, int allow_struct_init) {
         consume(p, TOKEN_INT);
         return node;
     } else if (p->current.type == TOKEN_STRING) {
-        ASTNode *node = ast_new(AST_LITERAL);
-        node->data.literal.value = strdup(p->current.text);
+        ASTNode *node = ast_new(AST_STRING_LITERAL);
+        node->data.string_literal.value = strdup(p->current.text);
         consume(p, TOKEN_STRING);
         return node;
-    } else if (p->current.type == TOKEN_IDENT || p->current.type == TOKEN_UNDERSCORE) {
+    } else if (p->current.type == TOKEN_IDENT || p->current.type == TOKEN_UNDERSCORE || p->current.type == TOKEN_SELF_UPPER) {
         char *name = NULL;
         if (p->current.type == TOKEN_UNDERSCORE) {
             name = strdup("_");
             consume(p, TOKEN_UNDERSCORE);
+        } else if (p->current.type == TOKEN_SELF_UPPER) {
+            name = strdup("Self");
+            consume(p, TOKEN_SELF_UPPER);
         } else {
             name = strdup(p->current.text);
             consume(p, TOKEN_IDENT);
@@ -443,6 +449,7 @@ static ASTNode *parse_primary(Parser *p, int allow_struct_init) {
             }
         }
         
+        after_ident_label:
         if (p->current.type == TOKEN_BANG) {
             consume(p, TOKEN_BANG);
             ASTNode **args = malloc(sizeof(ASTNode*) * 10);
@@ -513,46 +520,53 @@ static ASTNode *parse_primary(Parser *p, int allow_struct_init) {
             node->data.struct_init.fields = fields;
             node->data.struct_init.field_count = field_count;
             return node;
-        } else if (p->current.type == TOKEN_LT) {
-            // Generic constructor call Result::<i32>::Ok(42) or Vec::<i32>::new()
-            // For now, let's just parse the turbo-fish and ignore it or append it to name
-            consume(p, TOKEN_LT);
-            char *type_params = parse_type(p);
-            consume(p, TOKEN_GT);
-            while (p->current.type == TOKEN_COLON_COLON) {
-                consume(p, TOKEN_COLON_COLON);
-                if (p->current.type == TOKEN_IDENT) {
-                    char *member = strdup(p->current.text);
-                    consume(p, TOKEN_IDENT);
-                    char *fullname = malloc(strlen(name) + 2 + strlen(member) + 1);
-                    sprintf(fullname, "%s_%s", name, member);
-                    free(name);
-                    free(member);
-                    name = fullname;
-                } else {
-                    break;
-                }
-            }
-            // Re-check for call or struct init
-            if (p->current.type == TOKEN_LPAREN) {
-                // Call after turbofish
-                consume(p, TOKEN_LPAREN);
-                ASTNode **args = malloc(sizeof(ASTNode*) * 10);
-                int arg_count = 0;
-                while (p->current.type != TOKEN_RPAREN && p->current.type != TOKEN_EOF) {
-                    args[arg_count++] = parse_expression(p);
-                    if (p->current.type == TOKEN_COMMA) {
-                        consume(p, TOKEN_COMMA);
+        } else if (p->current.type == TOKEN_COLON_COLON) {
+            consume(p, TOKEN_COLON_COLON);
+            if (p->current.type == TOKEN_LT) {
+                // Turbo-fish x::<i32>
+                consume(p, TOKEN_LT);
+                char *type_params = parse_type(p);
+                consume(p, TOKEN_GT);
+                while (p->current.type == TOKEN_COLON_COLON) {
+                    consume(p, TOKEN_COLON_COLON);
+                    if (p->current.type == TOKEN_IDENT) {
+                        char *member = strdup(p->current.text);
+                        consume(p, TOKEN_IDENT);
+                        char *fullname = malloc(strlen(name) + 2 + strlen(member) + 1);
+                        sprintf(fullname, "%s_%s", name, member);
+                        free(name);
+                        free(member);
+                        name = fullname;
+                    } else {
+                        break;
                     }
                 }
-                consume(p, TOKEN_RPAREN);
-                ASTNode *node = ast_new(AST_CALL);
-                node->data.call.name = name;
-                node->data.call.args = args;
-                node->data.call.arg_count = arg_count;
-                return node;
+                // Re-check for call after turbofish
+                if (p->current.type == TOKEN_LPAREN) {
+                    consume(p, TOKEN_LPAREN);
+                    ASTNode **args = malloc(sizeof(ASTNode*) * 10);
+                    int arg_count = 0;
+                    while (p->current.type != TOKEN_RPAREN && p->current.type != TOKEN_EOF) {
+                        args[arg_count++] = parse_expression(p);
+                        if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
+                    }
+                    consume(p, TOKEN_RPAREN);
+                    ASTNode *node = ast_new(AST_CALL);
+                    node->data.call.name = name;
+                    node->data.call.args = args;
+                    node->data.call.arg_count = arg_count;
+                    return node;
+                }
+            } else if (p->current.type == TOKEN_IDENT) {
+                char *member = strdup(p->current.text);
+                consume(p, TOKEN_IDENT);
+                char *fullname = malloc(strlen(name) + 2 + strlen(member) + 1);
+                sprintf(fullname, "%s_%s", name, member);
+                free(name);
+                free(member);
+                name = fullname;
+                goto after_ident_label;
             }
-            // If not a call, it's just a name (maybe a type constant)
             ASTNode *node = ast_new(AST_IDENT);
             node->data.ident.name = name;
             return node;
@@ -626,6 +640,64 @@ static ASTNode *parse_primary(Parser *p, int allow_struct_init) {
         node->data.bool_literal.value = 0;
         consume(p, TOKEN_FALSE);
         return node;
+    } else if (p->current.type == TOKEN_LBRACE) {
+        return parse_block(p);
+    } else if (p->current.type == TOKEN_IF) {
+        consume(p, TOKEN_IF);
+        ASTNode *condition = parse_expression(p);
+        ASTNode *then_branch = parse_block(p);
+        ASTNode *else_branch = NULL;
+        if (p->current.type == TOKEN_ELSE) {
+            consume(p, TOKEN_ELSE);
+            if (p->current.type == TOKEN_IF) {
+                else_branch = parse_statement(p);
+            } else {
+                else_branch = parse_block(p);
+            }
+        }
+        ASTNode *node = ast_new(AST_IF);
+        node->data.if_stmt.condition = condition;
+        node->data.if_stmt.then_branch = then_branch;
+        node->data.if_stmt.else_branch = else_branch;
+        return node;
+    } else if (p->current.type == TOKEN_WHILE) {
+        consume(p, TOKEN_WHILE);
+        ASTNode *condition = parse_expression(p);
+        ASTNode *body = parse_block(p);
+        ASTNode *node = ast_new(AST_WHILE);
+        node->data.while_loop.condition = condition;
+        node->data.while_loop.body = body;
+        return node;
+    } else if (p->current.type == TOKEN_MATCH) {
+        consume(p, TOKEN_MATCH);
+        ASTNode *expr = parse_expression_no_struct(p);
+        consume(p, TOKEN_LBRACE);
+        ASTNode **arms = malloc(sizeof(ASTNode*) * 20);
+        int arm_count = 0;
+        while (p->current.type != TOKEN_RBRACE && p->current.type != TOKEN_EOF) {
+            ASTNode *pattern = parse_pattern(p);
+            consume(p, TOKEN_FAT_ARROW);
+            ASTNode *body;
+            if (p->current.type == TOKEN_LBRACE) {
+                body = parse_block(p);
+            } else {
+                body = parse_expression(p);
+                if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
+            }
+            ASTNode *arm = ast_new(AST_MATCH_ARM);
+            arm->data.match_arm.pattern = pattern;
+            arm->data.match_arm.body = body;
+            arms[arm_count++] = arm;
+            if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
+        }
+        consume(p, TOKEN_RBRACE);
+        ASTNode *node = ast_new(AST_MATCH);
+        node->data.match_stmt.expr = expr;
+        node->data.match_stmt.arms = arms;
+        node->data.match_stmt.arm_count = arm_count;
+        return node;
+    } else if (p->current.type == TOKEN_LBRACE) {
+        return parse_block(p);
     }
     return NULL;
 }
@@ -723,6 +795,11 @@ ASTNode *parse_statement(Parser *p) {
         consume(p, TOKEN_UNSAFE);
         return parse_statement(p);
     }
+    
+    if (p->current.type == TOKEN_IF || p->current.type == TOKEN_WHILE || p->current.type == TOKEN_MATCH || p->current.type == TOKEN_LBRACE) {
+        return parse_primary(p, 1);
+    }
+
     if (p->current.type == TOKEN_LET) {
         consume(p, TOKEN_LET);
         if (p->current.type == TOKEN_MUT) {
@@ -761,58 +838,10 @@ ASTNode *parse_statement(Parser *p) {
             // We'd need to extend AST_VAR_DECL to store the pattern
             return node;
         }
-    } else if (p->current.type == TOKEN_IF) {
-        consume(p, TOKEN_IF);
-        if (p->current.type == TOKEN_LET) {
-             consume(p, TOKEN_LET);
-             ASTNode *pattern = parse_pattern(p);
-             consume(p, TOKEN_EQUAL);
-             ASTNode *expr = parse_expression(p);
-             ASTNode *then_branch = parse_block(p);
-             ASTNode *else_branch = NULL;
-             if (p->current.type == TOKEN_ELSE) {
-                 consume(p, TOKEN_ELSE);
-                 if (p->current.type == TOKEN_IF) {
-                     else_branch = parse_statement(p);
-                 } else {
-                     else_branch = parse_block(p);
-                 }
-             }
-             ASTNode *cond = ast_new(AST_BINOP);
-             cond->data.binop.op = strdup("if_let");
-             cond->data.binop.left = pattern;
-             cond->data.binop.right = expr;
-             
-             ASTNode *node = ast_new(AST_IF);
-             node->data.if_stmt.condition = cond;
-             node->data.if_stmt.then_branch = then_branch;
-             node->data.if_stmt.else_branch = else_branch;
-             return node;
-        }
-        ASTNode *condition = parse_expression(p);
-        ASTNode *then_branch = parse_block(p);
-        ASTNode *else_branch = NULL;
-        if (p->current.type == TOKEN_ELSE) {
-            consume(p, TOKEN_ELSE);
-            if (p->current.type == TOKEN_IF) {
-                else_branch = parse_statement(p);
-            } else {
-                else_branch = parse_block(p);
-            }
-        }
-        ASTNode *node = ast_new(AST_IF);
-        node->data.if_stmt.condition = condition;
-        node->data.if_stmt.then_branch = then_branch;
-        node->data.if_stmt.else_branch = else_branch;
-        return node;
-    } else if (p->current.type == TOKEN_WHILE) {
-        consume(p, TOKEN_WHILE);
-        ASTNode *condition = parse_expression(p);
-        ASTNode *body = parse_block(p);
-        ASTNode *node = ast_new(AST_WHILE);
-        node->data.while_loop.condition = condition;
-        node->data.while_loop.body = body;
-        return node;
+    } else if (p->current.type == TOKEN_TYPE) {
+        return parse_type_alias(p);
+    } else if (p->current.type == TOKEN_CONST) {
+        return parse_const(p);
     } else if (p->current.type == TOKEN_RETURN) {
         consume(p, TOKEN_RETURN);
         ASTNode *value = NULL;
@@ -823,34 +852,6 @@ ASTNode *parse_statement(Parser *p) {
         ASTNode *node = ast_new(AST_RETURN);
         node->data.ret_stmt.value = value;
         return node;
-    } else if (p->current.type == TOKEN_MATCH) {
-        consume(p, TOKEN_MATCH);
-        ASTNode *expr = parse_expression_no_struct(p);
-        consume(p, TOKEN_LBRACE);
-        ASTNode **arms = malloc(sizeof(ASTNode*) * 20);
-        int arm_count = 0;
-        while (p->current.type != TOKEN_RBRACE && p->current.type != TOKEN_EOF) {
-            ASTNode *pattern = parse_pattern(p);
-            consume(p, TOKEN_FAT_ARROW);
-            ASTNode *body;
-            if (p->current.type == TOKEN_LBRACE) {
-                body = parse_block(p);
-            } else {
-                body = parse_expression(p);
-                if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
-            }
-            ASTNode *arm = ast_new(AST_MATCH_ARM);
-            arm->data.match_arm.pattern = pattern;
-            arm->data.match_arm.body = body;
-            arms[arm_count++] = arm;
-            if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
-        }
-        consume(p, TOKEN_RBRACE);
-        ASTNode *node = ast_new(AST_MATCH);
-        node->data.match_stmt.expr = expr;
-        node->data.match_stmt.arms = arms;
-        node->data.match_stmt.arm_count = arm_count;
-        return node;
     } else {
         ASTNode *expr = parse_expression(p);
         if (p->current.type == TOKEN_SEMICOLON) {
@@ -860,28 +861,69 @@ ASTNode *parse_statement(Parser *p) {
     }
 }
 
+ASTNode *parse_type_alias(Parser *p) {
+    consume(p, TOKEN_TYPE);
+    char *name = strdup(p->current.text);
+    consume(p, TOKEN_IDENT);
+    consume(p, TOKEN_EQUAL);
+    char *type_name = parse_type(p);
+    consume(p, TOKEN_SEMICOLON);
+    
+    ASTNode *node = ast_new(AST_TYPE_ALIAS);
+    node->data.type_alias.name = name;
+    node->data.type_alias.type_name = type_name;
+    return node;
+}
+
+ASTNode *parse_const(Parser *p) {
+    consume(p, TOKEN_CONST);
+    char *name = strdup(p->current.text);
+    consume(p, TOKEN_IDENT);
+    consume(p, TOKEN_COLON);
+    char *type_name = parse_type(p);
+    
+    ASTNode *value = NULL;
+    if (p->current.type == TOKEN_EQUAL) {
+        consume(p, TOKEN_EQUAL);
+        value = parse_expression(p);
+    }
+    consume(p, TOKEN_SEMICOLON);
+    
+    ASTNode *node = ast_new(AST_CONST);
+    node->data.const_decl.name = name;
+    node->data.const_decl.type_name = type_name;
+    node->data.const_decl.value = value;
+    return node;
+}
+
 ASTNode *parse_trait(Parser *p) {
     consume(p, TOKEN_TRAIT);
     char *name = strdup(p->current.text);
     consume(p, TOKEN_IDENT);
     consume(p, TOKEN_LBRACE);
     
-    ASTNode **methods = malloc(sizeof(ASTNode*) * 20);
-    int method_count = 0;
+    ASTNode **items = malloc(sizeof(ASTNode*) * 20);
+    int item_count = 0;
     while (p->current.type != TOKEN_RBRACE && p->current.type != TOKEN_EOF) {
-        // Traits can have function signatures or default implementations
-        // For now, assume signatures ending with semicolon
-        methods[method_count++] = parse_function(p);
-        if (p->current.type == TOKEN_SEMICOLON) {
-            consume(p, TOKEN_SEMICOLON);
+        if (p->current.type == TOKEN_FN) {
+            items[item_count++] = parse_function(p);
+        } else if (p->current.type == TOKEN_TYPE) {
+            items[item_count++] = parse_type_alias(p);
+        } else if (p->current.type == TOKEN_CONST) {
+            items[item_count++] = parse_const(p);
+        } else {
+             // Skip unexpected
+             token_free(p->current);
+             p->current = p->next;
+             p->next = lexer_next_token(p->lexer);
         }
     }
     consume(p, TOKEN_RBRACE);
     
     ASTNode *node = ast_new(AST_TRAIT);
     node->data.trait_decl.name = name;
-    node->data.trait_decl.methods = methods;
-    node->data.trait_decl.method_count = method_count;
+    node->data.trait_decl.methods = items;
+    node->data.trait_decl.method_count = item_count;
     return node;
 }
 
@@ -966,15 +1008,48 @@ ASTNode *parse_struct(Parser *p) {
         char **generic_params = malloc(sizeof(char*) * 10);
         int generic_param_count = 0;
         while (p->current.type != TOKEN_GT && p->current.type != TOKEN_EOF) {
-            generic_params[generic_param_count++] = strdup(p->current.text);
-            consume(p, TOKEN_IDENT);
+            if (p->current.type == TOKEN_IDENT) {
+                generic_params[generic_param_count++] = strdup(p->current.text);
+                consume(p, TOKEN_IDENT);
+            } else {
+                // skip other tokens in generics for now
+                consume(p, p->current.type);
+            }
             if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
         }
         consume(p, TOKEN_GT);
         node->data.struct_decl.generic_params = generic_params;
         node->data.struct_decl.generic_param_count = generic_param_count;
     }
+
+    if (p->current.type == TOKEN_SEMICOLON) {
+        // Unit struct: struct Foo;
+        consume(p, TOKEN_SEMICOLON);
+        node->data.struct_decl.fields = NULL;
+        node->data.struct_decl.field_count = 0;
+        return node;
+    }
     
+    if (p->current.type == TOKEN_LPAREN) {
+        // Tuple struct: struct Foo(i32, i32);
+        consume(p, TOKEN_LPAREN);
+        ASTNode **fields = malloc(sizeof(ASTNode*) * 10);
+        int field_count = 0;
+        while (p->current.type != TOKEN_RPAREN && p->current.type != TOKEN_EOF) {
+            ASTNode *field = ast_new(AST_PARAM);
+            field->data.param.name = malloc(16);
+            sprintf(field->data.param.name, "_%d", field_count);
+            field->data.param.type_name = parse_type(p);
+            fields[field_count++] = field;
+            if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
+        }
+        consume(p, TOKEN_RPAREN);
+        consume(p, TOKEN_SEMICOLON);
+        node->data.struct_decl.fields = fields;
+        node->data.struct_decl.field_count = field_count;
+        return node;
+    }
+
     consume(p, TOKEN_LBRACE);
     
     ASTNode **fields = malloc(sizeof(ASTNode*) * 20);
@@ -1003,38 +1078,78 @@ ASTNode *parse_struct(Parser *p) {
 
 ASTNode *parse_impl(Parser *p) {
     consume(p, TOKEN_IMPL);
+    
+    char **generic_params = NULL;
+    int generic_param_count = 0;
+    if (p->current.type == TOKEN_LT) {
+        consume(p, TOKEN_LT);
+        generic_params = malloc(sizeof(char*) * 10);
+        while (p->current.type != TOKEN_GT && p->current.type != TOKEN_EOF) {
+            generic_params[generic_param_count++] = strdup(p->current.text);
+            consume(p, TOKEN_IDENT);
+            if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
+        }
+        consume(p, TOKEN_GT);
+    }
+    
     char *trait_name = NULL;
     char *struct_name = strdup(p->current.text);
     consume(p, TOKEN_IDENT);
+    
+    if (p->current.type == TOKEN_LT) {
+        // Skip generic args for now
+        consume(p, TOKEN_LT);
+        while (p->current.type != TOKEN_GT && p->current.type != TOKEN_EOF) {
+            consume(p, p->current.type);
+        }
+        consume(p, TOKEN_GT);
+    }
     
     if (p->current.type == TOKEN_FOR) {
         consume(p, TOKEN_FOR);
         trait_name = struct_name;
         struct_name = strdup(p->current.text);
         consume(p, TOKEN_IDENT);
+    } else if (p->current.type == TOKEN_IDENT) {
+        // Handle impl Trait for Struct where Trait was already parsed as struct_name
+        trait_name = struct_name;
+        struct_name = strdup(p->current.text);
+        consume(p, TOKEN_IDENT);
+        if (p->current.type == TOKEN_FOR) consume(p, TOKEN_FOR); // Should have been handled above, but just in case
     }
     
     consume(p, TOKEN_LBRACE);
     
-    ASTNode **methods = malloc(sizeof(ASTNode*) * 50);
-    int method_count = 0;
+    ASTNode **items = malloc(sizeof(ASTNode*) * 50);
+    int item_count = 0;
     while (p->current.type != TOKEN_RBRACE && p->current.type != TOKEN_EOF) {
-        methods[method_count++] = parse_function(p);
+        if (p->current.type == TOKEN_FN) {
+            items[item_count++] = parse_function(p);
+        } else if (p->current.type == TOKEN_TYPE) {
+            items[item_count++] = parse_type_alias(p);
+        } else if (p->current.type == TOKEN_CONST) {
+            items[item_count++] = parse_const(p);
+        } else {
+             // Skip unexpected
+             token_free(p->current);
+             p->current = p->next;
+             p->next = lexer_next_token(p->lexer);
+        }
     }
     consume(p, TOKEN_RBRACE);
     
     if (trait_name) {
-        ASTNode *node = ast_new(AST_FOR_STMT); // Reusing AST_FOR_STMT for trait impl
+        ASTNode *node = ast_new(AST_TRAIT_IMPL);
         node->data.trait_impl.trait_name = trait_name;
         node->data.trait_impl.struct_name = struct_name;
-        node->data.trait_impl.methods = methods;
-        node->data.trait_impl.method_count = method_count;
+        node->data.trait_impl.methods = items;
+        node->data.trait_impl.method_count = item_count;
         return node;
     } else {
         ASTNode *node = ast_new(AST_IMPL);
         node->data.impl_block.struct_name = struct_name;
-        node->data.impl_block.methods = methods;
-        node->data.impl_block.method_count = method_count;
+        node->data.impl_block.methods = items;
+        node->data.impl_block.method_count = item_count;
         return node;
     }
 }
@@ -1052,8 +1167,12 @@ ASTNode *parse_enum(Parser *p) {
         char **generic_params = malloc(sizeof(char*) * 10);
         int generic_param_count = 0;
         while (p->current.type != TOKEN_GT && p->current.type != TOKEN_EOF) {
-            generic_params[generic_param_count++] = strdup(p->current.text);
-            consume(p, TOKEN_IDENT);
+            if (p->current.type == TOKEN_IDENT) {
+                generic_params[generic_param_count++] = strdup(p->current.text);
+                consume(p, TOKEN_IDENT);
+            } else {
+                consume(p, p->current.type);
+            }
             if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
         }
         consume(p, TOKEN_GT);

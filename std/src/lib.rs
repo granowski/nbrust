@@ -1,21 +1,3 @@
-pub use io::File;
-pub use fs::*;
-pub use collections::*;
-pub use path::*;
-pub use alloc::*;
-pub use core::*;
-
-pub mod io;
-pub mod collections;
-pub mod fs;
-pub mod path;
-pub mod alloc;
-pub mod core;
-
-pub fn print_hello() {
-    println!("Hello from std!");
-}
-
 pub enum Result<T, E> {
     Ok(T),
     Err(E),
@@ -30,4 +12,13 @@ pub struct Vec<T> {
     data: *mut T,
     len: usize,
     cap: usize,
+}
+
+impl<T> Vec<T> {
+    pub fn new() -> Self {
+        Vec { data: 0 as *mut T, len: 0, cap: 0 }
+    }
+    pub fn len(&self) -> usize {
+        self.len
+    }
 }
