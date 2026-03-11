@@ -12,6 +12,7 @@ typedef enum {
     TYPE_REFERENCE,
     TYPE_FUNCTION,
     TYPE_GENERIC,
+    TYPE_ASSOCIATED,
     TYPE_UNKNOWN
 } TypeKind;
 
@@ -62,8 +63,14 @@ typedef struct Type {
         struct {
             char *name;
         } generic;
+        struct {
+            struct Type *trait;
+            char *name;
+        } associated;
     } data;
 } Type;
+
+Type *type_associated(Type *trait, const char *name);
 
 Type *type_new(TypeKind kind);
 Type *type_primitive(PrimitiveType prim);

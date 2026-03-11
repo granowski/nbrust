@@ -69,6 +69,7 @@ typedef enum {
     TOKEN_DOLLAR,     // $
     TOKEN_LBRACKET,   // [
     TOKEN_RBRACKET,   // ]
+    TOKEN_MOD_OP,     // %
     TOKEN_EOF,
     TOKEN_UNKNOWN
 } TokenType;

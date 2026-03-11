@@ -3,33 +3,79 @@
 #include <stdlib.h>
 #include <string.h>
 
+typedef struct Borrow {
+    char *var_name;
+    int is_mut;
+    int depth;
+    struct Borrow *next;
+} Borrow;
+
 typedef struct VarState {
     char *name;
     int is_moved;
-    int borrow_count;
-    int is_mut_borrowed;
+    int depth;
     struct VarState *next;
 } VarState;
 
-static VarState *current_scope = NULL;
+static VarState *current_vars = NULL;
+static Borrow *current_borrows = NULL;
+static int current_depth = 0;
 
 static void push_var(const char *name) {
     VarState *v = malloc(sizeof(VarState));
     v->name = strdup(name);
     v->is_moved = 0;
-    v->borrow_count = 0;
-    v->is_mut_borrowed = 0;
-    v->next = current_scope;
-    current_scope = v;
+    v->depth = current_depth;
+    v->next = current_vars;
+    current_vars = v;
+}
+
+static void push_borrow(const char *name, int is_mut) {
+    Borrow *b = malloc(sizeof(Borrow));
+    b->var_name = strdup(name);
+    b->is_mut = is_mut;
+    b->depth = current_depth;
+    b->next = current_borrows;
+    current_borrows = b;
 }
 
 static VarState *find_var(const char *name) {
-    VarState *v = current_scope;
+    VarState *v = current_vars;
     while (v) {
         if (strcmp(v->name, name) == 0) return v;
         v = v->next;
     }
     return NULL;
+}
+
+static int count_borrows(const char *name, int *is_mut) {
+    int count = 0;
+    *is_mut = 0;
+    Borrow *b = current_borrows;
+    while (b) {
+        if (strcmp(b->var_name, name) == 0) {
+            count++;
+            if (b->is_mut) *is_mut = 1;
+        }
+        b = b->next;
+    }
+    return count;
+}
+
+static void pop_scope() {
+    while (current_vars && current_vars->depth == current_depth) {
+        VarState *next = current_vars->next;
+        free(current_vars->name);
+        free(current_vars);
+        current_vars = next;
+    }
+    while (current_borrows && current_borrows->depth == current_depth) {
+        Borrow *next = current_borrows->next;
+        free(current_borrows->var_name);
+        free(current_borrows);
+        current_borrows = next;
+    }
+    current_depth--;
 }
 
 static void check_node(ASTNode *node) {
@@ -38,9 +84,14 @@ static void check_node(ASTNode *node) {
     switch (node->type) {
         case AST_VAR_DECL:
             if (node->data.var_decl.init && node->data.var_decl.init->type == AST_IDENT) {
-                VarState *v = find_var(node->data.var_decl.init->data.ident.name);
-                if (v && !v->borrow_count && !v->is_mut_borrowed) {
+                const char *init_name = node->data.var_decl.init->data.ident.name;
+                VarState *v = find_var(init_name);
+                int is_mut_borrowed = 0;
+                int borrow_count = count_borrows(init_name, &is_mut_borrowed);
+                if (v && !borrow_count && !is_mut_borrowed) {
                     v->is_moved = 1;
+                } else if (v) {
+                    fprintf(stderr, "Borrow check error at %d:%d: cannot move '%s' because it is borrowed\n", node->line, node->col, init_name);
                 }
             }
             push_var(node->data.var_decl.name);
@@ -56,53 +107,84 @@ static void check_node(ASTNode *node) {
         case AST_UNOP:
             if (strcmp(node->data.unop.op, "&") == 0) {
                  if (node->data.unop.expr->type == AST_IDENT) {
-                     VarState *v = find_var(node->data.unop.expr->data.ident.name);
-                     if (v) v->borrow_count++;
-                 }
-            } else if (strcmp(node->data.unop.op, "&mut ") == 0) {
-                 if (node->data.unop.expr->type == AST_IDENT) {
-                     VarState *v = find_var(node->data.unop.expr->data.ident.name);
+                     const char *name = node->data.unop.expr->data.ident.name;
+                     VarState *v = find_var(name);
                      if (v) {
-                         if (v->borrow_count > 0 || v->is_mut_borrowed) {
-                             fprintf(stderr, "Borrow check error at %d:%d: cannot borrow '%s' as mutable more than once at a time\n", node->line, node->col, v->name);
+                         int is_mut_borrowed = 0;
+                         count_borrows(name, &is_mut_borrowed);
+                         if (is_mut_borrowed) {
+                             fprintf(stderr, "Borrow check error at %d:%d: cannot borrow '%s' as immutable because it is also borrowed as mutable\n", node->line, node->col, name);
                          }
-                         v->is_mut_borrowed = 1;
+                         push_borrow(name, 0);
+                     }
+                 }
+            } else if (strcmp(node->data.unop.op, "&mut ") == 0 || strcmp(node->data.unop.op, "&mut") == 0) {
+                 if (node->data.unop.expr->type == AST_IDENT) {
+                     const char *name = node->data.unop.expr->data.ident.name;
+                     VarState *v = find_var(name);
+                     if (v) {
+                         int is_mut_borrowed = 0;
+                         int borrow_count = count_borrows(name, &is_mut_borrowed);
+                         if (borrow_count > 0 || is_mut_borrowed) {
+                             fprintf(stderr, "Borrow check error at %d:%d: cannot borrow '%s' as mutable more than once at a time\n", node->line, node->col, name);
+                         }
+                         push_borrow(name, 1);
                      }
                  }
             }
             check_node(node->data.unop.expr);
             break;
         case AST_FUNC: {
-            VarState *old_scope = current_scope;
-            current_scope = NULL; // New function scope
+            VarState *old_vars = current_vars;
+            Borrow *old_borrows = current_borrows;
+            int old_depth = current_depth;
+            current_vars = NULL; // New function scope
+            current_borrows = NULL;
+            current_depth = 0;
             for (int i = 0; i < node->data.func.param_count; i++) {
                 push_var(node->data.func.params[i]->data.param.name);
             }
             check_node(node->data.func.body);
             // Free current scope
-            VarState *v = current_scope;
-            while (v) {
-                VarState *next = v->next;
-                free(v->name);
-                free(v);
-                v = next;
+            while (current_vars) {
+                VarState *next = current_vars->next;
+                free(current_vars->name);
+                free(current_vars);
+                current_vars = next;
             }
-            current_scope = old_scope;
+            while (current_borrows) {
+                Borrow *next = current_borrows->next;
+                free(current_borrows->var_name);
+                free(current_borrows);
+                current_borrows = next;
+            }
+            current_vars = old_vars;
+            current_borrows = old_borrows;
+            current_depth = old_depth;
             break;
         }
         case AST_BLOCK:
+            current_depth++;
             for (int i = 0; i < node->data.block.count; i++) {
                 check_node(node->data.block.statements[i]);
             }
+            pop_scope();
             break;
         case AST_CALL:
             for (int i = 0; i < node->data.call.arg_count; i++) {
                 ASTNode *arg = node->data.call.args[i];
                 if (arg->type == AST_IDENT) {
-                    VarState *v = find_var(arg->data.ident.name);
+                    const char *name = arg->data.ident.name;
+                    VarState *v = find_var(name);
                     // Move if it's not a reference (simple heuristic)
-                    if (v && !v->borrow_count && !v->is_mut_borrowed) {
-                         v->is_moved = 1;
+                    if (v) {
+                        int is_mut_borrowed = 0;
+                        int borrow_count = count_borrows(name, &is_mut_borrowed);
+                        if (!borrow_count && !is_mut_borrowed) {
+                             v->is_moved = 1;
+                        } else {
+                             fprintf(stderr, "Borrow check error at %d:%d: cannot move '%s' because it is borrowed\n", node->line, node->col, name);
+                        }
                     }
                 }
                 check_node(arg);
@@ -123,9 +205,16 @@ static void check_node(ASTNode *node) {
             break;
         case AST_BINOP:
             if (strcmp(node->data.binop.op, "=") == 0 && node->data.binop.right->type == AST_IDENT) {
-                VarState *v = find_var(node->data.binop.right->data.ident.name);
-                if (v && !v->borrow_count && !v->is_mut_borrowed) {
-                    v->is_moved = 1;
+                const char *name = node->data.binop.right->data.ident.name;
+                VarState *v = find_var(name);
+                if (v) {
+                    int is_mut_borrowed = 0;
+                    int borrow_count = count_borrows(name, &is_mut_borrowed);
+                    if (!borrow_count && !is_mut_borrowed) {
+                        v->is_moved = 1;
+                    } else {
+                        fprintf(stderr, "Borrow check error at %d:%d: cannot move '%s' because it is borrowed\n", node->line, node->col, name);
+                    }
                 }
             }
             check_node(node->data.binop.left);

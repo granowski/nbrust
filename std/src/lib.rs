@@ -1,3 +1,25 @@
+pub mod io {
+    pub struct Stdin {}
+    pub struct Stdout {}
+    pub struct Stderr {}
+
+    pub fn stdin() -> Stdin { Stdin {} }
+    pub fn stdout() -> Stdout { Stdout {} }
+    pub fn stderr() -> Stderr { Stderr {} }
+
+    impl Stdout {
+        pub fn write_all(&mut self, buf: &[u8]) {
+            // Stub for C's fwrite
+        }
+    }
+}
+
+pub mod process {
+    pub fn exit(code: i32) -> ! {
+        unsafe { exit(code) };
+    }
+}
+
 pub struct Box<T> {
     ptr: *mut T,
 }

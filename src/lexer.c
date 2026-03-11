@@ -185,6 +185,7 @@ Token lexer_next_token(Lexer *l) {
                 return make_token(TOKEN_FAT_ARROW, "=>", line, col);
             }
             return make_token(TOKEN_EQUAL, "=", line, col);
+        case '%': advance(l); return make_token(TOKEN_MOD_OP, "%", line, col);
         case '!':
             if (peek(l) == '=') {
                 advance(l);

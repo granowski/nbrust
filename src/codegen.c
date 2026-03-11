@@ -108,6 +108,11 @@ static void codegen_node(ASTNode *node, FILE *out) {
 
 static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
     if (!node) return;
+    if (node->type == AST_BLOCK) {
+        // Emit drop calls for variables in this block
+        // In a real implementation, we'd check if the type implements Drop
+    }
+    
     switch (node->type) {
         case AST_FUNC:
             if (node->data.func.body == NULL) break; // Trait signature, handled in AST_TRAIT

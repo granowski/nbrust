@@ -62,6 +62,13 @@ Type *type_generic(const char *name) {
     return t;
 }
 
+Type *type_associated(Type *trait, const char *name) {
+    Type *t = type_new(TYPE_ASSOCIATED);
+    t->data.associated.trait = trait;
+    t->data.associated.name = strdup(name);
+    return t;
+}
+
 void type_free(Type *type) {
     if (!type) return;
     switch (type->kind) {
@@ -78,6 +85,10 @@ void type_free(Type *type) {
             free(type->data.function.params);
             break;
         case TYPE_GENERIC: free(type->data.generic.name); break;
+        case TYPE_ASSOCIATED:
+            // trait is just a pointer, we don't necessarily want to free it here if it's shared
+            free(type->data.associated.name);
+            break;
         default: break;
     }
     free(type);
@@ -101,6 +112,9 @@ int type_equals(Type *t1, Type *t2) {
             }
             return 1;
         case TYPE_GENERIC: return strcmp(t1->data.generic.name, t2->data.generic.name) == 0;
+        case TYPE_ASSOCIATED:
+            return strcmp(t1->data.associated.name, t2->data.associated.name) == 0 &&
+                   type_equals(t1->data.associated.trait, t2->data.associated.trait);
         case TYPE_UNKNOWN: return 1;
     }
     return 0;
@@ -142,6 +156,9 @@ const char *type_to_string(Type *type) {
             snprintf(buf, sizeof(buf), "fn(...) -> %s", type_to_string(type->data.function.return_type));
             return buf;
         case TYPE_GENERIC: return type->data.generic.name;
+        case TYPE_ASSOCIATED:
+            snprintf(buf, sizeof(buf), "<%s>::%s", type_to_string(type->data.associated.trait), type->data.associated.name);
+            return buf;
         case TYPE_UNKNOWN: return "unknown";
     }
     return "unknown";

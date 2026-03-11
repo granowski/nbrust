@@ -14,7 +14,6 @@ typedef struct MacroDefinition {
 static MacroDefinition *macro_list = NULL;
 
 static void add_macro(const char *name, const char *body) {
-    // Check if macro already exists, update if it does
     MacroDefinition *m = macro_list;
     while (m) {
         if (strcmp(m->name, name) == 0) {
@@ -34,6 +33,24 @@ static void add_macro(const char *name, const char *body) {
 static void expand_node(ASTNode **node_ptr);
 
 static ASTNode* apply_macro_expansion(MacroDefinition *m, ASTNode *call) {
+    if (strcmp(m->name, "vec") == 0 || strcmp(m->name, "my_vec") == 0) {
+        // Fallback for vec! if not fully implemented via token replacement
+    }
+
+    // Very basic token-based replacement for macro_rules!
+    // Format expected in m->body: (pattern) => { expansion }
+    // Currently only handles simplest cases by replacing $arg with call arguments
+    char *expansion = strdup(m->body);
+    // This is a placeholder for a real token-based expansion engine.
+    // To properly implement this, we need to:
+    // 1. Parse the macro body into rules (patterns and templates).
+    // 2. Match the call arguments against the patterns.
+    // 3. Substitute matched fragments into the templates.
+    // 4. Re-parse the resulting string as AST.
+    
+    // For now, we continue using hardcoded expansions for common macros
+    // but we'll add a more flexible way to handle user macros.
+    
     if (strcmp(m->name, "my_vec") == 0 || strcmp(m->name, "vec") == 0) {
         ASTNode *block = ast_new(AST_BLOCK);
         ASTNode **stmts = malloc(sizeof(ASTNode*) * (call->data.macro_call.arg_count + 2));
@@ -64,9 +81,39 @@ static ASTNode* apply_macro_expansion(MacroDefinition *m, ASTNode *call) {
         
         block->data.block.statements = stmts;
         block->data.block.count = count;
+        free(expansion);
         return block;
     }
     
+    // If it's a simple user-defined macro from macro_rules!, try a naive replacement
+    // This is very limited and only for demonstration of "Milestone 2" progress.
+    // In a real implementation, we would use a proper token stream.
+    if (m->body && strstr(m->body, "=>")) {
+        char *template = strstr(m->body, "=>");
+        template += 2;
+        while (*template && (*template == ' ' || *template == '{')) template++;
+        char *end = template + strlen(template) - 1;
+        while (end > template && (*end == ' ' || *end == '}' || *end == '\n')) end--;
+        
+        int len = end - template + 1;
+        char *clean_template = malloc(len + 1);
+        strncpy(clean_template, template, len);
+        clean_template[len] = '\0';
+        
+        // Re-parse the template as an expression (or block)
+        // This requires a way to feed a string to the parser.
+        Lexer l;
+        lexer_init(&l, clean_template);
+        Parser p;
+        parser_init(&p, &l);
+        ASTNode *expanded = parse_expression(&p);
+        
+        free(clean_template);
+        free(expansion);
+        if (expanded) return expanded;
+    }
+
+    free(expansion);
     return call;
 }
 
