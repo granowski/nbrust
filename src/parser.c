@@ -849,6 +849,20 @@ static ASTNode *parse_pattern(Parser *p) {
         return node;
     }
     
+    if (p->current.type == TOKEN_INT) {
+        ASTNode *node = ast_new(AST_LITERAL);
+        node->data.literal.value = strdup(p->current.text);
+        consume(p, TOKEN_INT);
+        return node;
+    }
+
+    if (p->current.type == TOKEN_STRING) {
+        ASTNode *node = ast_new(AST_STRING_LITERAL);
+        node->data.string_literal.value = strdup(p->current.text);
+        consume(p, TOKEN_STRING);
+        return node;
+    }
+
     if (p->current.type != TOKEN_IDENT) {
         return NULL;
     }
@@ -1305,6 +1319,9 @@ static ASTNode *parse_primary(Parser *p, int allow_struct_init) {
             arm->data.match_arm.body = body;
             arms[arm_count++] = arm;
             if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
+            if (arm_count >= 20) {
+                arms = realloc(arms, sizeof(ASTNode*) * (arm_count + 20));
+            }
         }
         consume(p, TOKEN_RBRACE);
         ASTNode *node = ast_new(AST_MATCH);
@@ -1358,13 +1375,27 @@ static ASTNode *parse_expression_precedence(Parser *p, int min_precedence, int a
             continue;
         }
 
+        if (p->current.type == TOKEN_LBRACKET) {
+            consume(p, TOKEN_LBRACKET);
+            ASTNode *index = parse_expression(p);
+            consume(p, TOKEN_RBRACKET);
+            ASTNode *node = ast_new(AST_METHOD_CALL);
+            node->data.method_call.receiver = left;
+            node->data.method_call.method_name = strdup("index");
+            node->data.method_call.args = malloc(sizeof(ASTNode*));
+            node->data.method_call.args[0] = index;
+            node->data.method_call.arg_count = 1;
+            left = node;
+            continue;
+        }
+
         int precedence = get_precedence(p->current.type);
         if (precedence == 0 || precedence < min_precedence) {
             break;
         }
 
-        char *op = strdup(p->current.text);
         TokenType type = p->current.type;
+        char *op = strdup(p->current.text);
         consume(p, type);
 
         if (type == TOKEN_DOT) {
@@ -1603,7 +1634,7 @@ ASTNode *parse_macro_rules(Parser *p) {
     // We need to capture the raw body for expansion.
     // For now, let's capture the tokens between { and } as a string or a list of tokens.
     // Since we only have body_text, let's try to reconstruct it.
-    char *body = malloc(4096);
+    char *body = malloc(16384);
     body[0] = '\0';
     
     if (p->current.type == TOKEN_LBRACE || p->current.type == TOKEN_LPAREN || p->current.type == TOKEN_LBRACKET) {
@@ -1614,6 +1645,10 @@ ASTNode *parse_macro_rules(Parser *p) {
         consume(p, open);
         int nest_count = 1;
         while (nest_count > 0 && p->current.type != TOKEN_EOF) {
+            if (strlen(body) + strlen(p->current.text) + 2 >= 16384) {
+                // Buffer overflow protection
+                break;
+            }
             strcat(body, " ");
             strcat(body, p->current.text);
             if (p->current.type == open) nest_count++;

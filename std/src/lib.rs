@@ -202,6 +202,16 @@ impl<T> Vec<T> {
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+        if index < self.len {
+            Option::Some(unsafe { (self.data + index) as &mut T })
+        } else {
+            Option::None
+        }
+    }
+}
+
+impl<T> Vec<T> {
     pub fn get(&self, index: usize) -> Option<&T> {
         if index < self.len {
             Option::Some(unsafe { (self.data + index) as &T })
@@ -210,6 +220,11 @@ impl<T> Vec<T> {
         }
     }
 }
+
+impl<T> Vec<T> {
+    pub fn index(&self, index: usize) -> &T {
+        unsafe { &*(self.data + index) }
+    }
 }
 
 pub struct VecIter<T> {

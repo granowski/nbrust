@@ -163,6 +163,8 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                               fprintf(out, "Point_%s(&%s", node->data.method_call.method_name, rname);
                          } else if (strcmp(rname, "s") == 0) { // Heuristic for MyStruct
                               fprintf(out, "MyStruct_Constants_%s(&%s", node->data.method_call.method_name, rname);
+                         } else if (strcmp(rname, "v") == 0) { // Heuristic for Vec
+                              fprintf(out, "Vec_%s(&%s", node->data.method_call.method_name, rname);
                          } else {
                               fprintf(out, "%s_%s(&%s", rname, node->data.method_call.method_name, rname);
                          }
@@ -428,7 +430,7 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                 }
                 fprintf(out, "'\\n\"); exit(1)");
             } else {
-                fprintf(out, "%s_expanded(", node->data.macro_call.name);
+                fprintf(out, "%s(", node->data.macro_call.name);
                 for (int i = 0; i < node->data.macro_call.arg_count; i++) {
                     codegen_node(node->data.macro_call.args[i], out);
                     if (i < node->data.macro_call.arg_count - 1) fprintf(out, ", ");
