@@ -77,7 +77,26 @@ static void codegen_expr(ASTNode *node, FILE *out, Target target) {
         case AST_LITERAL:
             fprintf(out, "    mov w0, %s\n", node->data.literal.value);
             break;
+        case AST_BOOL_LITERAL:
+            fprintf(out, "    mov w0, %d\n", node->data.bool_literal.value ? 1 : 0);
+            break;
         case AST_BINOP:
+            if (strcmp(node->data.binop.op, "=") == 0) {
+                codegen_expr(node->data.binop.right, out, target);
+                if (node->data.binop.left->type == AST_IDENT) {
+                    int offset = get_symbol_offset(node->data.binop.left->data.ident.name);
+                    if (offset != 0) {
+                        fprintf(out, "    str w0, [x29, #%d]\n", offset);
+                    }
+                } else if (node->data.binop.left->type == AST_UNOP && strcmp(node->data.binop.left->data.unop.op, "*") == 0) {
+                    fprintf(out, "    str x0, [sp, #-16]!\n");
+                    codegen_expr(node->data.binop.left->data.unop.expr, out, target);
+                    fprintf(out, "    mov x1, x0\n");
+                    fprintf(out, "    ldr x0, [sp], #16\n");
+                    fprintf(out, "    str w0, [x1]\n");
+                }
+                break;
+            }
             codegen_expr(node->data.binop.left, out, target);
             fprintf(out, "    str x0, [sp, #-16]!\n"); // Store x0 (64-bit) to keep stack aligned
             codegen_expr(node->data.binop.right, out, target);
@@ -107,6 +126,32 @@ static void codegen_expr(ASTNode *node, FILE *out, Target target) {
             } else if (strcmp(node->data.binop.op, ">=") == 0) {
                 fprintf(out, "    cmp w0, w1\n");
                 fprintf(out, "    cset w0, ge\n");
+            } else if (strcmp(node->data.binop.op, "&&") == 0) {
+                int l_false = next_label();
+                int l_end = next_label();
+                fprintf(out, "    cmp w0, #0\n");
+                fprintf(out, "    b.eq .L%d\n", l_false);
+                codegen_expr(node->data.binop.right, out, target);
+                fprintf(out, "    cmp w0, #0\n");
+                fprintf(out, "    b.eq .L%d\n", l_false);
+                fprintf(out, "    mov w0, #1\n");
+                fprintf(out, "    b .L%d\n", l_end);
+                fprintf(out, ".L%d:\n", l_false);
+                fprintf(out, "    mov w0, #0\n");
+                fprintf(out, ".L%d:\n", l_end);
+            } else if (strcmp(node->data.binop.op, "||") == 0) {
+                int l_true = next_label();
+                int l_end = next_label();
+                fprintf(out, "    cmp w0, #0\n");
+                fprintf(out, "    b.ne .L%d\n", l_true);
+                codegen_expr(node->data.binop.right, out, target);
+                fprintf(out, "    cmp w0, #0\n");
+                fprintf(out, "    b.ne .L%d\n", l_true);
+                fprintf(out, "    mov w0, #0\n");
+                fprintf(out, "    b .L%d\n", l_end);
+                fprintf(out, ".L%d:\n", l_true);
+                fprintf(out, "    mov w0, #1\n");
+                fprintf(out, ".L%d:\n", l_end);
             }
             break;
         case AST_IDENT: {
@@ -316,8 +361,7 @@ static void codegen_node(ASTNode *node, FILE *out, Target target) {
             int l_end = next_label();
             codegen_expr(node->data.match_stmt.expr, out, target);
             // Result of expr is in x0. 
-            // In C backend, match works on .tag. In our simplified ARM64, 
-            // we assume enums are structs where tag is the first 4-byte field.
+            // We assume enums are structs where tag is the first 4-byte field.
             fprintf(out, "    ldr w0, [x0]\n"); // Load tag from struct pointer in x0
             
             for (int i = 0; i < node->data.match_stmt.arm_count; i++) {
@@ -325,27 +369,35 @@ static void codegen_node(ASTNode *node, FILE *out, Target target) {
                 int l_next = next_label();
                 int l_body = next_label();
 
-                // Save current tag value as we might overwrite w0 in pattern evaluation
+                // Save current tag value
                 fprintf(out, "    str x0, [sp, #-16]!\n"); 
                 
-                // Pattern comparison. 
-                // Simplified: if pattern is IDENT, we might need its value.
-                // For now, let's assume patterns are literals or we treat them as such.
                 if (arm->data.match_arm.pattern->type == AST_IDENT && strcmp(arm->data.match_arm.pattern->data.ident.name, "_") == 0) {
-                    // Wildcard: always matches
-                    fprintf(out, "    ldr x0, [sp], #16\n"); // Restore tag to x0 (though not needed)
+                    fprintf(out, "    ldr x0, [sp], #16\n");
                     codegen_node(arm->data.match_arm.body, out, target);
                     fprintf(out, "    b .L%d\n", l_end);
                 } else {
+                    // Evaluate pattern tag
+                    ASTNode *pattern = arm->data.match_arm.pattern;
+                    if (pattern->type == AST_CALL) {
+                        // Enum variant with data (tuple-like)
+                        // We need the tag value. Hack: hash the name or use a mapping.
+                        // For now, assume pattern evaluation handles it.
+                        fprintf(out, "// Match arm for %s\n", pattern->data.call.name);
+                        // In nbrust, the tag for Enum_Variant is usually Enum_Variant.
+                        // We'll emit code that expects the tag to match.
+                    }
+                    
                     codegen_expr(arm->data.match_arm.pattern, out, target);
                     fprintf(out, "    mov w1, w0\n");
-                    fprintf(out, "    ldr x0, [sp], #16\n"); // Restore tag to x0
+                    fprintf(out, "    ldr x0, [sp], #16\n"); 
                     
                     fprintf(out, "    cmp w0, w1\n");
                     fprintf(out, "    b.eq .Lbody_%d\n", l_body);
                     fprintf(out, "    b .L%d\n", l_next);
                     
                     fprintf(out, ".Lbody_%d:\n", l_body);
+                    // Bindings extraction could go here if we knew types/offsets.
                     codegen_node(arm->data.match_arm.body, out, target);
                     fprintf(out, "    b .L%d\n", l_end);
                 }

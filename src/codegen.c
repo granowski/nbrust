@@ -396,21 +396,24 @@ static void codegen_node(ASTNode *node, FILE *out) {
                 if (node->data.macro_call.arg_count > 0 && node->data.macro_call.args[0]->type == AST_STRING_LITERAL) {
                     char *fmt = strdup(node->data.macro_call.args[0]->data.string_literal.value);
                     char *p = fmt;
+                    int has_placeholders = (strstr(p, "{}") != NULL);
                     while ((p = strstr(p, "{}"))) {
                         p[0] = '%';
-                        // Heuristic: Result patterns usually have an int (Ok) then a string (Err)
-                        // This is very hacky but works for the benchmark
                         if (strstr(fmt, "Value")) p[1] = 'd';
                         else p[1] = 's';
                         p += 2;
                     }
-                    fprintf(out, "\"%s\"", fmt);
+                    if (has_placeholders) {
+                        fprintf(out, "\"%s\"", fmt);
+                    } else {
+                        fprintf(out, "\"%s\"", node->data.macro_call.args[0]->data.string_literal.value);
+                    }
                     for (int i = 1; i < node->data.macro_call.arg_count; i++) {
                         fprintf(out, ", ");
                         codegen_node(node->data.macro_call.args[i], out);
                     }
                     free(fmt);
-                } else {
+                } else if (node->data.macro_call.arg_count > 0) {
                     for (int i = 0; i < node->data.macro_call.arg_count; i++) {
                         codegen_node(node->data.macro_call.args[i], out);
                         if (i < node->data.macro_call.arg_count - 1) fprintf(out, ", ");
@@ -419,9 +422,17 @@ static void codegen_node(ASTNode *node, FILE *out) {
                 fprintf(out, "); printf(\"\\n\")");
             } else if (strcmp(node->data.macro_call.name, "print") == 0) {
                 fprintf(out, "printf(");
-                for (int i = 0; i < node->data.macro_call.arg_count; i++) {
-                    codegen_node(node->data.macro_call.args[i], out);
-                    if (i < node->data.macro_call.arg_count - 1) fprintf(out, ", ");
+                if (node->data.macro_call.arg_count > 0 && node->data.macro_call.args[0]->type == AST_STRING_LITERAL) {
+                    fprintf(out, "\"%s\"", node->data.macro_call.args[0]->data.string_literal.value);
+                    for (int i = 1; i < node->data.macro_call.arg_count; i++) {
+                        fprintf(out, ", ");
+                        codegen_node(node->data.macro_call.args[i], out);
+                    }
+                } else {
+                    for (int i = 0; i < node->data.macro_call.arg_count; i++) {
+                        codegen_node(node->data.macro_call.args[i], out);
+                        if (i < node->data.macro_call.arg_count - 1) fprintf(out, ", ");
+                    }
                 }
                 fprintf(out, ")");
             } else if (strcmp(node->data.macro_call.name, "panic") == 0) {

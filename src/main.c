@@ -16,10 +16,12 @@ static char *lib_paths[64];
 static int lib_path_count = 0;
 
 static void process_file(const char *path, Target target);
+static char *output_filename = NULL;
+static int compile_only = 0;
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        fprintf(stderr, "Usage: %s <source.rs> [-L <lib_path>] [--arch <x86|x86_64|armv6|aarch64>] [--os <macos|netbsd>] [--backend <c|arm64-asm|armv6-asm>]\n", argv[0]);
+        fprintf(stderr, "Usage: %s <source.rs> [-L <lib_path>] [-o <output>] [-c] [--arch <x86|x86_64|armv6|aarch64>] [--os <macos|netbsd>] [--backend <c|arm64-asm|armv6-asm>]\n", argv[0]);
         return 1;
     }
 
@@ -30,6 +32,11 @@ int main(int argc, char **argv) {
         if (strcmp(argv[i], "-L") == 0 && i + 1 < argc) {
             lib_paths[lib_path_count++] = argv[i+1];
             i++;
+        } else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
+            output_filename = argv[i+1];
+            i++;
+        } else if (strcmp(argv[i], "-c") == 0) {
+            compile_only = 1;
         } else if (strcmp(argv[i], "--arch") == 0 && i + 1 < argc) {
             if (strcmp(argv[i+1], "x86") == 0) target.arch = ARCH_X86;
             else if (strcmp(argv[i+1], "x86_64") == 0) target.arch = ARCH_X86_64;
@@ -58,7 +65,52 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    process_file(source_path, target);
+    if (output_filename) {
+        char cmd[2048];
+        char tmp_source[1024];
+        if (target.backend == BACKEND_C) {
+            snprintf(tmp_source, sizeof(tmp_source), "/tmp/nbrust_out.c");
+        } else {
+            snprintf(tmp_source, sizeof(tmp_source), "/tmp/nbrust_out.s");
+        }
+
+        FILE *f = fopen(tmp_source, "w");
+        if (!f) { perror("fopen tmp"); return 1; }
+        
+        // Temporarily redirect stdout to our tmp file
+        // This is a bit hacky, better would be to pass FILE* to process_file
+        // But for now, we'll use freopen
+        FILE *original_stdout = stdout;
+        stdout = f;
+        process_file(source_path, target);
+        fclose(f);
+        stdout = original_stdout;
+
+        if (!compile_only) {
+            if (target.backend == BACKEND_C) {
+                snprintf(cmd, sizeof(cmd), "cc -std=c2x %s -o %s", tmp_source, output_filename);
+            } else if (target.backend == BACKEND_ARM64_ASM) {
+                if (target.os == OS_MACOS) {
+                    snprintf(cmd, sizeof(cmd), "as -arch arm64 %s -o /tmp/nbrust_out.o && ld -o %s /tmp/nbrust_out.o -lSystem", tmp_source, output_filename);
+                } else {
+                    snprintf(cmd, sizeof(cmd), "as %s -o /tmp/nbrust_out.o && ld -o %s /tmp/nbrust_out.o", tmp_source, output_filename);
+                }
+            } else if (target.backend == BACKEND_ARMV6_ASM) {
+                snprintf(cmd, sizeof(cmd), "as %s -o /tmp/nbrust_out.o && ld -o %s /tmp/nbrust_out.o", tmp_source, output_filename);
+            }
+            printf("Running: %s\n", cmd);
+            int res = system(cmd);
+            if (res != 0) {
+                fprintf(stderr, "Compilation failed with code %d\n", res);
+                return 1;
+            }
+        } else {
+             snprintf(cmd, sizeof(cmd), "cp %s %s", tmp_source, output_filename);
+             system(cmd);
+        }
+    } else {
+        process_file(source_path, target);
+    }
 
     return 0;
 }

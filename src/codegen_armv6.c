@@ -77,7 +77,26 @@ static void codegen_expr(ASTNode *node, FILE *out, Target target) {
         case AST_LITERAL:
             fprintf(out, "    ldr r0, =%s\n", node->data.literal.value);
             break;
+        case AST_BOOL_LITERAL:
+            fprintf(out, "    mov r0, #%d\n", node->data.bool_literal.value ? 1 : 0);
+            break;
         case AST_BINOP:
+            if (strcmp(node->data.binop.op, "=") == 0) {
+                codegen_expr(node->data.binop.right, out, target);
+                if (node->data.binop.left->type == AST_IDENT) {
+                    int offset = get_symbol_offset(node->data.binop.left->data.ident.name);
+                    if (offset != 0) {
+                        fprintf(out, "    str r0, [fp, #%d]\n", offset);
+                    }
+                } else if (node->data.binop.left->type == AST_UNOP && strcmp(node->data.binop.left->data.unop.op, "*") == 0) {
+                    fprintf(out, "    push {r0}\n");
+                    codegen_expr(node->data.binop.left->data.unop.expr, out, target);
+                    fprintf(out, "    mov r1, r0\n");
+                    fprintf(out, "    pop {r0}\n");
+                    fprintf(out, "    str r0, [r1]\n");
+                }
+                break;
+            }
             codegen_expr(node->data.binop.left, out, target);
             fprintf(out, "    push {r0}\n");
             codegen_expr(node->data.binop.right, out, target);
@@ -113,6 +132,32 @@ static void codegen_expr(ASTNode *node, FILE *out, Target target) {
                 fprintf(out, "    cmp r0, r1\n");
                 fprintf(out, "    movge r0, #1\n");
                 fprintf(out, "    movlt r0, #0\n");
+            } else if (strcmp(node->data.binop.op, "&&") == 0) {
+                int l_false = next_label();
+                int l_end = next_label();
+                fprintf(out, "    cmp r0, #0\n");
+                fprintf(out, "    beq .L%d\n", l_false);
+                codegen_expr(node->data.binop.right, out, target);
+                fprintf(out, "    cmp r0, #0\n");
+                fprintf(out, "    beq .L%d\n", l_false);
+                fprintf(out, "    mov r0, #1\n");
+                fprintf(out, "    b .L%d\n", l_end);
+                fprintf(out, ".L%d:\n", l_false);
+                fprintf(out, "    mov r0, #0\n");
+                fprintf(out, ".L%d:\n", l_end);
+            } else if (strcmp(node->data.binop.op, "||") == 0) {
+                int l_true = next_label();
+                int l_end = next_label();
+                fprintf(out, "    cmp r0, #0\n");
+                fprintf(out, "    bne .L%d\n", l_true);
+                codegen_expr(node->data.binop.right, out, target);
+                fprintf(out, "    cmp r0, #0\n");
+                fprintf(out, "    bne .L%d\n", l_true);
+                fprintf(out, "    mov r0, #0\n");
+                fprintf(out, "    b .L%d\n", l_end);
+                fprintf(out, ".L%d:\n", l_true);
+                fprintf(out, "    mov r0, #1\n");
+                fprintf(out, ".L%d:\n", l_end);
             }
             break;
         case AST_IDENT: {
@@ -197,9 +242,6 @@ static void codegen_expr(ASTNode *node, FILE *out, Target target) {
             fprintf(out, "    ldr r0, =%s\n", label);
             break;
         }
-        case AST_BOOL_LITERAL:
-            fprintf(out, "    mov r0, #%d\n", node->data.bool_literal.value ? 1 : 0);
-            break;
         default:
             fprintf(out, "    // Unsupported ARMv6 expression node type %d\n", node->type);
             break;
@@ -317,6 +359,7 @@ static void codegen_node(ASTNode *node, FILE *out, Target target) {
         case AST_MATCH: {
             int l_end = next_label();
             codegen_expr(node->data.match_stmt.expr, out, target);
+            // Result is a pointer to the enum struct. Tag is at offset 0.
             fprintf(out, "    ldr r0, [r0]\n"); 
             
             for (int i = 0; i < node->data.match_stmt.arm_count; i++) {
@@ -324,6 +367,7 @@ static void codegen_node(ASTNode *node, FILE *out, Target target) {
                 int l_next = next_label();
                 int l_body = next_label();
                 fprintf(out, "    push {r0}\n"); 
+                
                 if (arm->data.match_arm.pattern->type == AST_IDENT && strcmp(arm->data.match_arm.pattern->data.ident.name, "_") == 0) {
                     fprintf(out, "    pop {r0}\n"); 
                     codegen_node(arm->data.match_arm.body, out, target);
@@ -332,9 +376,11 @@ static void codegen_node(ASTNode *node, FILE *out, Target target) {
                     codegen_expr(arm->data.match_arm.pattern, out, target);
                     fprintf(out, "    mov r1, r0\n");
                     fprintf(out, "    pop {r0}\n"); 
+                    
                     fprintf(out, "    cmp r0, r1\n");
                     fprintf(out, "    beq .Lbody_%d\n", l_body);
                     fprintf(out, "    b .L%d\n", l_next);
+                    
                     fprintf(out, ".Lbody_%d:\n", l_body);
                     codegen_node(arm->data.match_arm.body, out, target);
                     fprintf(out, "    b .L%d\n", l_end);
