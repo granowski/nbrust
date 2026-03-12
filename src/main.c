@@ -39,7 +39,7 @@ int main(int argc, char **argv) {
     }
 
     char *source_path = NULL;
-    Target target = { ARCH_X86_64, OS_NETBSD, BACKEND_C }; // Default target
+    Target target = { ARCH_AARCH64, OS_NETBSD, BACKEND_C }; // Default target
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-L") == 0 && i + 1 < argc) {
