@@ -29,6 +29,12 @@ On NetBSD or other systems using `bmake`:
 make -f Makefile.bsd
 ```
 
+If `make` fails, you can use the provided shell script to compile everything directly:
+```bash
+chmod +x build.sh
+./build.sh
+```
+
 To clean the build artifacts:
 ```bash
 make clean
