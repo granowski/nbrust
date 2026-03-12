@@ -41,44 +41,102 @@ static const char* map_type(const char* rust_type) {
             *lt = '\0';
             *gt = '\0';
             char *base = copy;
-            char *arg = lt + 1;
+            char *args_str = lt + 1;
             
-            // Check for multiple args
-            char *comma = strchr(arg, ',');
-            if (comma) *comma = '\0';
+            snprintf(buf, sizeof(buf), "struct %s", base);
             
-            // Simplified mangling for C compatibility, keeping it similar to monomorphization.c
-            char mangled_arg[256] = "";
-            for (int i = 0; arg[i]; i++) {
-                if (arg[i] == '&') strcat(mangled_arg, "Ref");
-                else if (arg[i] == ' ') strcat(mangled_arg, "_");
-                else if (arg[i] == '*') strcat(mangled_arg, "Ptr");
-                else {
-                    int len = strlen(mangled_arg);
-                    if (len < 250) {
-                        mangled_arg[len] = arg[i];
-                        mangled_arg[len+1] = '\0';
+            char *arg = strtok(args_str, ",");
+            while (arg) {
+                while (isspace(*arg)) arg++;
+                
+                strcat(buf, "_");
+                
+                // Simplified mangling for C compatibility
+                for (int i = 0; arg[i]; i++) {
+                    if (arg[i] == '&') strcat(buf, "Ref");
+                    else if (arg[i] == ' ') { /* skip */ }
+                    else if (arg[i] == '*') strcat(buf, "Ptr");
+                    else if (arg[i] == '<' || arg[i] == '>') strcat(buf, "_");
+                    else {
+                        int len = strlen(buf);
+                        if (len < sizeof(buf) - 2) {
+                            buf[len] = arg[i];
+                            buf[len+1] = '\0';
+                        }
                     }
                 }
+                arg = strtok(NULL, ",");
+            }
+
+            // Map common Rust primitives to their C-style names used in specialization
+            if (strstr(buf, "_i32")) { /* Replace _i32 with _int */
+                char *p = strstr(buf, "_i32");
+                memcpy(p, "_int", 4);
+                memmove(p+4, p+4, strlen(p+4)+1);
+            }
+            if (strstr(buf, "_i8")) {
+                char *p = strstr(buf, "_i8");
+                memcpy(p, "_char", 5);
+                memmove(p+5, p+3, strlen(p+3)+1);
+            }
+            if (strstr(buf, "_u8")) {
+                char *p = strstr(buf, "_u8");
+                memcpy(p, "_char", 5);
+                memmove(p+5, p+3, strlen(p+3)+1);
+            }
+            if (strstr(buf, "_unsigned_char")) {
+                char *p = strstr(buf, "_unsigned_char");
+                memcpy(p, "_char", 5);
+                memmove(p+5, p+14, strlen(p+14)+1);
+            }
+            if (strstr(buf, "Ref_u8")) {
+                char *p = strstr(buf, "Ref_u8");
+                memcpy(p, "Ref_char", 8);
+                memmove(p+8, p+6, strlen(p+6)+1);
+            }
+            if (strstr(buf, "Ref_unsigned_char")) {
+                char *p = strstr(buf, "Ref_unsigned_char");
+                memcpy(p, "Ref_char", 8);
+                memmove(p+8, p+17, strlen(p+17)+1);
             }
             
-            // Map common Rust primitives to their C-style names used in specialization
-            if (strcmp(mangled_arg, "i32") == 0) strcpy(mangled_arg, "int");
-            if (strcmp(mangled_arg, "i8") == 0) strcpy(mangled_arg, "char");
-            if (strcmp(mangled_arg, "int") == 0) strcpy(mangled_arg, "int");
-            
-            snprintf(buf, sizeof(buf), "struct %s_%s", base, mangled_arg);
             free(copy);
             return buf;
         }
         free(copy);
     }
     
-    if (rust_type[0] == '&' || rust_type[0] == '*') {
+    if (rust_type && rust_type[0] == '&') {
+        const char *inner = rust_type + 1;
+        if (strncmp(inner, "mut ", 4) == 0) inner += 4;
+        
+        if (inner[0] == '[') {
+            // Handle &[u8] etc
+            if (strstr(inner, "u8") || strstr(inner, "unsigned char")) return "unsigned char*";
+            return "void*";
+        }
+        
+        if (strcmp(inner, "self") == 0 || strcmp(inner, "Self") == 0) {
+             snprintf(buf, sizeof(buf), "struct %s*", current_impl_struct);
+             return buf;
+        }
+        const char *mapped_inner = map_type(inner);
+        if (strchr(mapped_inner, '*') || strncmp(mapped_inner, "struct ", 7) == 0 ||
+            strstr(mapped_inner, "int") || strstr(mapped_inner, "char") ||
+            strstr(mapped_inner, "float") || strstr(mapped_inner, "double") ||
+            strstr(mapped_inner, "size_t") || strstr(mapped_inner, "void")) {
+            snprintf(buf, sizeof(buf), "%s*", mapped_inner);
+        } else {
+            snprintf(buf, sizeof(buf), "struct %s*", mapped_inner);
+        }
+        return buf;
+    }
+    
+    if (rust_type[0] == '*') {
         const char *inner = rust_type + 1;
         int is_const = 0;
-        if (rust_type[0] == '*' && (strncmp(inner, "mut ", 4) == 0)) inner += 4;
-        else if (rust_type[0] == '*' && (strncmp(inner, "const ", 6) == 0)) {
+        if (strncmp(inner, "mut ", 4) == 0) inner += 4;
+        else if (strncmp(inner, "const ", 6) == 0) {
             inner += 6;
             is_const = 1;
         }
@@ -91,7 +149,8 @@ static const char* map_type(const char* rust_type) {
         const char *const_prefix = is_const ? "const " : "";
         if (strchr(mapped_inner, '*') || strncmp(mapped_inner, "struct ", 7) == 0 ||
             strstr(mapped_inner, "int") || strstr(mapped_inner, "char") ||
-            strstr(mapped_inner, "float") || strstr(mapped_inner, "double")) {
+            strstr(mapped_inner, "float") || strstr(mapped_inner, "double") ||
+            strstr(mapped_inner, "size_t") || strstr(mapped_inner, "void")) {
             snprintf(buf, sizeof(buf), "%s%s*", const_prefix, mapped_inner);
         } else {
             snprintf(buf, sizeof(buf), "%sstruct %s*", const_prefix, mapped_inner);
@@ -137,9 +196,33 @@ static const char* map_type(const char* rust_type) {
         strcmp(rust_type, "int") == 0 || strcmp(rust_type, "char") == 0 || 
         strcmp(rust_type, "float") == 0 || strcmp(rust_type, "double") == 0 ||
         strcmp(rust_type, "void") == 0 || strcmp(rust_type, "size_t") == 0 ||
+        strcmp(rust_type, "ssize_t") == 0 || strcmp(rust_type, "unsigned int") == 0 ||
+        strcmp(rust_type, "unsigned char") == 0 || strcmp(rust_type, "long long") == 0 ||
         strstr(rust_type, "_object") || strstr(rust_type, "_vtable"))) {
         return rust_type;
     }
+    
+    // Handle slice/array mapping to C
+    if (rust_type && (strcmp(rust_type, "[u8]") == 0 || strcmp(rust_type, "&[u8]") == 0 || 
+                      strcmp(rust_type, "mut [u8]") == 0 || strcmp(rust_type, "&mut [u8]") == 0 ||
+                      strcmp(rust_type, "unsigned char[]") == 0)) {
+        return "unsigned char*";
+    }
+    if (rust_type && rust_type[0] == '[') {
+        return "void*";
+    }
+    
+    // Handle Box/Option/Result special cases for C naming
+    if (strcmp(rust_type, "Box") == 0) return "void*";
+    if (strcmp(rust_type, "Option") == 0) return "struct Option";
+    if (strcmp(rust_type, "Result") == 0) return "struct Result";
+    if (strcmp(rust_type, "Vec") == 0) return "struct Vec";
+    if (strcmp(rust_type, "String") == 0) return "struct String";
+    if (strcmp(rust_type, "u8") == 0) return "unsigned char";
+    if (strcmp(rust_type, "i8") == 0) return "char";
+    if (strcmp(rust_type, "i32") == 0) return "int";
+    if (strcmp(rust_type, "u32") == 0) return "unsigned int";
+    if (strcmp(rust_type, "usize") == 0) return "size_t";
 
     snprintf(buf, sizeof(buf), "struct %s", rust_type);
     return buf;
@@ -187,6 +270,7 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             fprintf(out, "\n");
             break;
         case AST_IMPL:
+            if (node->data.impl_block.generic_param_count > 0) break;
             strncpy(current_impl_struct, node->data.impl_block.struct_name, sizeof(current_impl_struct)-1);
             for (int i = 0; i < node->data.impl_block.method_count; i++) {
                 ASTNode *method = node->data.impl_block.methods[i];
@@ -734,7 +818,8 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                         stmt->type == AST_UNOP ||
                         stmt->type == AST_STRUCT_INIT ||
                         stmt->type == AST_IF ||
-                        stmt->type == AST_MATCH) {
+                        stmt->type == AST_MATCH ||
+                        stmt->type == AST_MACRO_CALL) {
                         fprintf(out, "    return ");
                     }
                 }
@@ -750,6 +835,9 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                     stmt->type == AST_UNOP ||
                     stmt->type == AST_STRUCT_INIT) {
                     fprintf(out, is_expr ? "; " : ";\n");
+                } else if (stmt->type == AST_IF || stmt->type == AST_MATCH || stmt->type == AST_BLOCK) {
+                    if (is_expr) fprintf(out, "; ");
+                    else fprintf(out, "\n");
                 }
             }
             if (is_expr) fprintf(out, " })");
@@ -803,12 +891,12 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                              if (node->data.var_decl.init->resolved_type) {
                                   fprintf(out, "    %s %s", map_type(type_to_string(node->data.var_decl.init->resolved_type)), node->data.var_decl.name);
                              } else {
-                                  fprintf(out, "    auto %s", node->data.var_decl.name);
+                                  fprintf(out, "    int %s", node->data.var_decl.name); // Default to int for auto-replacement
                              }
                         }
                     }
                     free(clean_name);
-                } else fprintf(out, "    auto %s", node->data.var_decl.name);
+                } else fprintf(out, "    int %s", node->data.var_decl.name); // Default to int for auto-replacement
                 if (node->data.var_decl.init) { 
                     fprintf(out, " = "); 
                     codegen_node_ext(node->data.var_decl.init, out, 1); 
@@ -903,15 +991,17 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             break;
         case AST_IF:
             if (is_expr) {
-                fprintf(out, "({ auto _res = 0; if ("); // Initializer for C23 auto
+                fprintf(out, "({ int _res = 0; if (");
                 codegen_node_ext(node->data.if_stmt.condition, out, 1);
-                fprintf(out, ") _res = ");
+                fprintf(out, ") { _res = ");
                 codegen_node_ext(node->data.if_stmt.then_branch, out, 1);
+                fprintf(out, "; }");
                 if (node->data.if_stmt.else_branch) {
-                    fprintf(out, "; else _res = ");
+                    fprintf(out, " else { _res = ");
                     codegen_node_ext(node->data.if_stmt.else_branch, out, 1);
+                    fprintf(out, "; }");
                 }
-                fprintf(out, "; _res; })");
+                fprintf(out, " _res; })");
             } else {
                 fprintf(out, "    if (");
                 codegen_node_ext(node->data.if_stmt.condition, out, 0);

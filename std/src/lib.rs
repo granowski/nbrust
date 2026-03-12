@@ -3,9 +3,9 @@ pub mod io {
     pub struct Stdout {}
     pub struct Stderr {}
 
-    pub fn stdin() -> Stdin { Stdin {} }
-    pub fn stdout() -> Stdout { Stdout {} }
-    pub fn stderr() -> Stderr { Stderr {} }
+    pub fn rust_stdin() -> Stdin { return Stdin {}; }
+    pub fn rust_stdout() -> Stdout { return Stdout {}; }
+    pub fn rust_stderr() -> Stderr { return Stderr {}; }
 
     impl Stdout {
         pub fn write_all(&mut self, buf: &[u8]) {

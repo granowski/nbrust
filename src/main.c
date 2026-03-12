@@ -84,37 +84,22 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Total nodes collected: %d\n", all_node_count);
     fflush(stderr);
 
-    // Run passes on all collected nodes
+    // Register all generics from all crates first
     for (int i = 0; i < all_node_count; i++) {
         ASTNode *ast = all_nodes[i];
-        if (!ast) { fprintf(stderr, "Null node at %d\n", i); continue; }
+        if (!ast) continue;
         int is_generic = (ast->type == AST_FUNC && ast->data.func.generic_param_count > 0) ||
                          (ast->type == AST_STRUCT_DECL && ast->data.struct_decl.generic_param_count > 0) ||
-                         (ast->type == AST_ENUM_DECL && ast->data.enum_decl.generic_param_count > 0);
-        if (is_generic) {
-             fprintf(stderr, "Registering generic: %d (type %d)\n", i, ast->type);
-             monomorphization_register(ast);
-        }
+                         (ast->type == AST_ENUM_DECL && ast->data.enum_decl.generic_param_count > 0) ||
+                         (ast->type == AST_IMPL && ast->data.impl_block.generic_param_count > 0);
+        if (is_generic) monomorphization_register(ast);
     }
 
-    fprintf(stderr, "Running macro expand...\n");
-    fflush(stderr);
-    for (int i = 0; i < all_node_count; i++) {
-         fprintf(stderr, "  node %d\n", i);
-         fflush(stderr);
-         macro_expand_run(all_nodes[i]);
-    }
-    fprintf(stderr, "Running monomorphization...\n");
-    for (int i = 0; i < all_node_count; i++) {
-         fprintf(stderr, "  node %d\n", i);
-         fflush(stderr);
-         monomorphization_run(all_nodes[i]);
-    }
-
-    // Second pass to catch specializations triggered by first pass (e.g. specialized functions calling other generics)
-    fprintf(stderr, "Running monomorphization second pass...\n");
-    for (int i = 0; i < all_node_count; i++) {
-         monomorphization_run(all_nodes[i]);
+    for (int i = 0; i < all_node_count; i++) macro_expand_run(all_nodes[i]);
+    
+    // Repeat monomorphization passes to handle transitive dependencies
+    for (int pass = 0; pass < 3; pass++) {
+        for (int i = 0; i < all_node_count; i++) monomorphization_run(all_nodes[i]);
     }
 
     // Filter out original generic nodes
@@ -209,10 +194,11 @@ int main(int argc, char **argv) {
              ASTNode *ast = all_nodes[i];
              int is_generic = (ast->type == AST_FUNC && ast->data.func.generic_param_count > 0) ||
                               (ast->type == AST_STRUCT_DECL && ast->data.struct_decl.generic_param_count > 0) ||
-                              (ast->type == AST_ENUM_DECL && ast->data.enum_decl.generic_param_count > 0);
+                              (ast->type == AST_ENUM_DECL && ast->data.enum_decl.generic_param_count > 0) ||
+                              (ast->type == AST_IMPL && ast->data.impl_block.generic_param_count > 0);
              if (!is_generic) {
                  codegen_generate(ast, stdout, target, current_crate_name);
-                 if (target.backend == BACKEND_C && (ast->type == AST_BINOP || ast->type == AST_IDENT || ast->type == AST_LITERAL || ast->type == AST_CALL || ast->type == AST_METHOD_CALL || ast->type == AST_MACRO_CALL || ast->type == AST_FIELD_ACCESS || ast->type == AST_UNOP || ast->type == AST_IF || ast->type == AST_MATCH || ast->type == AST_BLOCK)) {
+                 if (target.backend == BACKEND_C && (ast->type == AST_BINOP || ast->type == AST_IDENT || ast->type == AST_LITERAL || ast->type == AST_CALL || ast->type == AST_METHOD_CALL || ast->type == AST_MACRO_CALL || ast->type == AST_FIELD_ACCESS || ast->type == AST_UNOP || ast->type == AST_IF || ast->type == AST_MATCH || ast->type == AST_BLOCK || ast->type == AST_VAR_DECL)) {
                      printf(";\n");
                  }
              }
@@ -226,7 +212,7 @@ int main(int argc, char **argv) {
 }
 
 static void process_file(const char *path, Target target) {
-    fprintf(stderr, "Processing file: %s\n", path);
+    //fprintf(stderr, "Processing file: %s\n", path);
     fflush(stderr);
     char *old_crate = current_crate_name;
     if (strstr(path, "/src/lib.rs")) {

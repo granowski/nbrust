@@ -86,8 +86,12 @@ static char *mangle_name(const char *base, char **args, int count) {
             else { int len = strlen(buf); if (len < 500) { buf[len] = arg[j]; buf[len+1] = '\0'; } }
         }
     }
-    if (strstr(buf, "_i32")) { char *p = strstr(buf, "_i32"); memcpy(p, "_int", 4); }
-    if (strstr(buf, "_i8")) { char *p = strstr(buf, "_i8"); memcpy(p, "_char", 5); }
+    if (strstr(buf, "_i32")) { char *p = strstr(buf, "_i32"); memcpy(p, "_int", 4); memmove(p+4, p+4, strlen(p+4)+1); }
+    if (strstr(buf, "_i8")) { char *p = strstr(buf, "_i8"); memcpy(p, "_char", 5); memmove(p+5, p+3, strlen(p+3)+1); }
+    if (strstr(buf, "_u8")) { char *p = strstr(buf, "_u8"); memcpy(p, "_char", 5); memmove(p+5, p+3, strlen(p+3)+1); }
+    if (strstr(buf, "_unsigned_char")) { char *p = strstr(buf, "_unsigned_char"); memcpy(p, "_char", 5); memmove(p+5, p+14, strlen(p+14)+1); }
+    if (strstr(buf, "Ref_u8")) { char *p = strstr(buf, "Ref_u8"); memcpy(p, "Ref_char", 8); memmove(p+8, p+6, strlen(p+6)+1); }
+    if (strstr(buf, "Ref_unsigned_char")) { char *p = strstr(buf, "Ref_unsigned_char"); memcpy(p, "Ref_char", 8); memmove(p+8, p+17, strlen(p+17)+1); }
     return strdup(buf);
 }
 
@@ -275,7 +279,7 @@ static void walk_and_specialize(ASTNode *node) {
     switch (node->type) {
         case AST_STRUCT_DECL:
             if (node->data.struct_decl.generic_param_count > 0) {
-                 monomorphization_register_generic(node->data.struct_decl.name, node);
+                 monomorphization_register(node);
             } else { 
                 if (node->data.struct_decl.fields) {
                     for (int i = 0; i < node->data.struct_decl.field_count; i++) walk_and_specialize(node->data.struct_decl.fields[i]);
@@ -284,7 +288,7 @@ static void walk_and_specialize(ASTNode *node) {
             break;
         case AST_ENUM_DECL:
             if (node->data.enum_decl.generic_param_count > 0) {
-                 monomorphization_register_generic(node->data.enum_decl.name, node);
+                 monomorphization_register(node);
             } else { 
                 if (node->data.enum_decl.variants) {
                     for (int i = 0; i < node->data.enum_decl.variant_count; i++) walk_and_specialize(node->data.enum_decl.variants[i]);

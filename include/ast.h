@@ -133,6 +133,8 @@ typedef struct ASTNode {
             char *struct_name;
             struct ASTNode **methods;
             int method_count;
+            char **generic_params;
+            int generic_param_count;
         } impl_block;
         struct {
             struct ASTNode *receiver;

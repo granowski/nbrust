@@ -754,6 +754,8 @@ void real_consume(Parser *p, TokenType type, int call_line, const char *type_nam
         token_free(p->current);
         p->current = p->next;
         p->next = lexer_next_token(p->lexer);
+        // If we are at EOF, we should stop
+        if (p->current.type == TOKEN_EOF) exit(1);
     }
 }
 
@@ -1300,6 +1302,21 @@ static ASTNode *parse_primary(Parser *p, int allow_struct_init) {
         consume(p, TOKEN_RPAREN);
         return expr;
     } else if (p->current.type == TOKEN_IF) {
+        // Handled below but let's ensure it can be an expression
+        goto if_match_expr;
+    } else if (p->current.type == TOKEN_MATCH) {
+        goto if_match_expr;
+    } else if (p->current.type == TOKEN_INT) {
+        ASTNode *node = ast_new(AST_LITERAL);
+        node->data.literal.value = strdup(p->current.text);
+        consume(p, TOKEN_INT);
+        return node;
+    } else {
+        // Fallthrough or error
+    }
+
+if_match_expr:
+    if (p->current.type == TOKEN_IF) {
         consume(p, TOKEN_IF);
         ASTNode *condition = parse_expression(p);
         ASTNode *then_branch = parse_block(p);
@@ -1332,49 +1349,6 @@ static ASTNode *parse_primary(Parser *p, int allow_struct_init) {
         consume(p, TOKEN_IN);
         ASTNode *iterable = parse_expression_no_struct(p);
         ASTNode *body = parse_block(p);
-
-        /* Desugar: 
-           {
-             let mut __iter = IntoIterator::into_iter(iterable);
-             while let Some(var_name) = __iter.next() {
-                body
-             }
-           }
-           Actually, simpler for now:
-           {
-             let mut __iter = iterable.into_iter();
-             while { let __next = __iter.next(); match __next { Some(var_name) => true, None => false } } {
-                let var_name = match __next { Some(v) => v };
-                body
-             }
-           }
-           Wait, 'while let' is better but nbrust might not have it.
-           Let's use a simple while with match.
-        */
-        ASTNode *block = ast_new(AST_BLOCK);
-        block->data.block.statements = malloc(sizeof(ASTNode*) * 2);
-        block->data.block.count = 2;
-
-        // let mut __iter = iterable.into_iter();
-        ASTNode *iter_init = ast_new(AST_VAR_DECL);
-        iter_init->data.var_decl.name = strdup("__iter");
-        iter_init->data.var_decl.is_mutable = 1;
-        
-        ASTNode *into_iter_call = ast_new(AST_METHOD_CALL);
-        into_iter_call->data.method_call.receiver = iterable;
-        into_iter_call->data.method_call.method_name = strdup("into_iter");
-        into_iter_call->data.method_call.args = NULL;
-        into_iter_call->data.method_call.arg_count = 0;
-        iter_init->data.var_decl.init = into_iter_call;
-        block->data.block.statements[0] = iter_init;
-
-        // while loop
-        ASTNode *while_node = ast_new(AST_WHILE);
-        
-        // condition: { __next = __iter.next(); match __next { Some(_) => true, None => false } }
-        // For simplicity in nbrust codegen, let's use a helper or specific AST_FOR_STMT if we want it to be clean.
-        // But desugaring is more robust if we have the building blocks.
-        // Let's use AST_FOR_STMT and handle it in codegen to avoid complex desugaring here.
         
         ASTNode *for_node = ast_new(AST_FOR_STMT);
         for_node->data.for_loop.var_name = var_name;
@@ -1389,7 +1363,6 @@ static ASTNode *parse_primary(Parser *p, int allow_struct_init) {
         int arm_count = 0;
         while (p->current.type != TOKEN_RBRACE && p->current.type != TOKEN_EOF) {
             ASTNode *pattern = parse_pattern(p);
-            // consume(p, TOKEN_FAT_ARROW);
             if (p->current.type == TOKEN_FAT_ARROW) consume(p, TOKEN_FAT_ARROW);
             else {
                  fprintf(stderr, "Expected => at line %d, got %d ('%s')\n", p->current.line, p->current.type, p->current.text);
@@ -1421,25 +1394,17 @@ static ASTNode *parse_primary(Parser *p, int allow_struct_init) {
         node->data.match_stmt.arms = arms;
         node->data.match_stmt.arm_count = arm_count;
         return node;
-    } else if (p->current.type == TOKEN_LBRACE) {
-        return parse_block(p);
-    } else if (p->current.type == TOKEN_INT) {
-        ASTNode *node = ast_new(AST_LITERAL);
-        node->data.literal.value = strdup(p->current.text);
-        consume(p, TOKEN_INT);
-        return node;
-    } else {
-        fprintf(stderr, "Unexpected token in parse_primary: type %d ('%s') at line %d\n", p->current.type, p->current.text ? p->current.text : "NULL", p->current.line);
-        fflush(stderr);
-        // Ensure we consume something to avoid infinite loops
-        Token t = p->current;
-        p->current = p->next;
-        p->next = lexer_next_token(p->lexer);
-        ASTNode *err = ast_new(AST_IDENT);
-        err->data.ident.name = strdup(t.text ? t.text : "error");
-        token_free(t);
-        return err;
     }
+    
+    fprintf(stderr, "Unexpected token in parse_primary: type %d ('%s') at line %d\n", p->current.type, p->current.text ? p->current.text : "NULL", p->current.line);
+    fflush(stderr);
+    Token t = p->current;
+    p->current = p->next;
+    p->next = lexer_next_token(p->lexer);
+    ASTNode *err = ast_new(AST_IDENT);
+    err->data.ident.name = strdup(t.text ? t.text : "error");
+    token_free(t);
+    return err;
 }
 
 static int get_precedence(TokenType type) {
@@ -2017,8 +1982,8 @@ ASTNode *parse_impl(Parser *p) {
         }
         if (p->current.type == TOKEN_RBRACE) break;
         
-        fprintf(stderr, "Impl block item starting with token type %d ('%s') at line %d\n", p->current.type, p->current.text ? p->current.text : "NULL", p->current.line);
-        fflush(stderr);
+        // fprintf(stderr, "Impl block item starting with token type %d ('%s') at line %d\n", p->current.type, p->current.text ? p->current.text : "NULL", p->current.line);
+        // fflush(stderr);
 
         if (p->current.type == TOKEN_FN) {
             items[item_count++] = parse_function(p);
@@ -2056,6 +2021,8 @@ ASTNode *parse_impl(Parser *p) {
         node->data.impl_block.struct_name = struct_name;
         node->data.impl_block.methods = items;
         node->data.impl_block.method_count = item_count;
+        node->data.impl_block.generic_params = generic_params;
+        node->data.impl_block.generic_param_count = generic_param_count;
         return node;
     }
 }
