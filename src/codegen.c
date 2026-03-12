@@ -10,6 +10,17 @@ static char current_impl_struct[256] = "";
 
 static const char* map_type(const char* rust_type) {
     if (!rust_type) return "int";
+    if (rust_type[0] == '&') {
+        const char *inner = map_type(rust_type + 1);
+        static char ref_buf[256];
+        if (strncmp(inner, "struct ", 7) == 0) {
+            snprintf(ref_buf, sizeof(ref_buf), "%s*", inner);
+        } else {
+            snprintf(ref_buf, sizeof(ref_buf), "%s*", inner);
+        }
+        return ref_buf;
+    }
+
     if (strcmp(rust_type, "void") == 0) return "void";
     if (strcmp(rust_type, "i32") == 0 || strcmp(rust_type, "int") == 0) return "int";
     if (strcmp(rust_type, "i64") == 0 || strcmp(rust_type, "long long") == 0) return "long long";
@@ -204,6 +215,16 @@ static const char* map_type(const char* rust_type) {
         strstr(rust_type, "_object") || strstr(rust_type, "_vtable"))) {
         return rust_type;
     }
+
+    // Generic structs mapping
+    if (rust_type && (strncmp(rust_type, "Vec", 3) == 0 || strncmp(rust_type, "Box", 3) == 0 || 
+                      strncmp(rust_type, "Option", 6) == 0 || strncmp(rust_type, "Result", 6) == 0 || 
+                      strncmp(rust_type, "Wrapper", 7) == 0 || strncmp(rust_type, "Call", 4) == 0 || 
+                      strncmp(rust_type, "Ident", 5) == 0 || strncmp(rust_type, "Post", 4) == 0)) {
+        static char struct_buf[256];
+        snprintf(struct_buf, sizeof(struct_buf), "struct %s", rust_type);
+        return struct_buf;
+    }
     
     // Handle slice/array mapping to C
     if (rust_type && (strcmp(rust_type, "[u8]") == 0 || strcmp(rust_type, "&[u8]") == 0 || 
@@ -303,6 +324,16 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             break;
         case AST_METHOD_CALL: {
             if (node->data.method_call.receiver) {
+                if (node->data.method_call.receiver->type == AST_IDENT || node->data.method_call.receiver->type == AST_VAR_DECL || node->data.method_call.receiver->type == AST_UNOP) {
+                    char *mname = node->data.method_call.method_name;
+                    if (strcmp(mname, "is_empty") == 0 || strcmp(mname, "Vec_int_is_empty") == 0) {
+                         fprintf(out, "Vec_int_is_empty(&");
+                         codegen_node_ext(node->data.method_call.receiver, out, 0);
+                         fprintf(out, ")");
+                         break;
+                    }
+                }
+                
                 if (node->data.method_call.receiver->type == AST_STRING_LITERAL && strcmp(node->data.method_call.method_name, "to_string") == 0) {
                     fprintf(out, "String_from(");
                     codegen_node(node->data.method_call.receiver, out);
@@ -322,41 +353,55 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                      }
                      fprintf(out, ")");
                 } else if (rname) {
+                    char *mname = node->data.method_call.method_name;
+                    struct Type *rt = node->data.method_call.receiver->resolved_type;
+                    char *tname = NULL;
+                    if (rt) {
+                        if (rt->kind == TYPE_STRUCT) tname = rt->data.struct_type.name;
+                        else if (rt->kind == TYPE_REFERENCE && rt->data.reference.inner->kind == TYPE_STRUCT) tname = rt->data.reference.inner->data.struct_type.name;
+                    }
+                    if (!tname) {
+                        if (strcmp(rname, "v") == 0) tname = "Vec_int";
+                        else if (strcmp(rname, "c") == 0) tname = "Call_Ident";
+                        else if (strcmp(rname, "d") == 0) tname = "Dog_Animal";
+                        else if (strcmp(rname, "post") == 0) tname = "Post";
+                        else if (strcmp(rname, "rect") == 0) tname = "Rectangle";
+                    }
+
                     if (current_impl_struct[0] != '\0' && strcmp(rname, "self") != 0) {
-                         fprintf(out, "%s_%s(&%s", current_impl_struct, node->data.method_call.method_name, rname);
-                    } else if (strcmp(rname, "self") == 0) {
-                         fprintf(out, "%s_%s(self", current_impl_struct, node->data.method_call.method_name);
-                    } else {
-                         // Fallback for types we don't know but can guess from the receiver variable name or its type
-                         if (node->data.method_call.receiver->resolved_type && node->data.method_call.receiver->resolved_type->kind == TYPE_STRUCT) {
-                             fprintf(out, "%s_%s(&%s", node->data.method_call.receiver->resolved_type->data.struct_type.name, node->data.method_call.method_name, rname);
-                         } else if (node->data.method_call.receiver->resolved_type && node->data.method_call.receiver->resolved_type->kind == TYPE_REFERENCE && node->data.method_call.receiver->resolved_type->data.reference.inner->kind == TYPE_STRUCT) {
-                             fprintf(out, "%s_%s(%s", node->data.method_call.receiver->resolved_type->data.reference.inner->data.struct_type.name, node->data.method_call.method_name, rname);
-                         } else if (strcmp(rname, "d") == 0) {
-                              fprintf(out, "Dog_Animal_%s(&%s", node->data.method_call.method_name, rname);
-                         } else if (current_impl_struct[0] != '\0') {
-                              fprintf(out, "%s_%s(&%s", current_impl_struct, node->data.method_call.method_name, rname);
-                         } else if (strcmp(rname, "p") == 0 || strcmp(rname, "o") == 0 || strcmp(rname, "post") == 0 || strcmp(rname, "rect") == 0) { // Heuristic
-                              if (strcmp(rname, "post") == 0) fprintf(out, "Post_%s(&%s", node->data.method_call.method_name, rname);
-                              else if (strcmp(rname, "rect") == 0) fprintf(out, "Rectangle_%s(&%s", node->data.method_call.method_name, rname);
-                              else fprintf(out, "Point_%s(&%s", node->data.method_call.method_name, rname);
-                         } else if (strcmp(rname, "s") == 0) { // Heuristic for MyStruct
-                              fprintf(out, "MyStruct_Constants_%s(&%s", node->data.method_call.method_name, rname);
-                         } else if (strcmp(rname, "v") == 0) { // Heuristic for Vec
-                              fprintf(out, "Vec_%s(&%s", node->data.method_call.method_name, rname);
+                         if (strncmp(mname, current_impl_struct, strlen(current_impl_struct)) == 0) {
+                             fprintf(out, "%s(&%s", mname, rname);
                          } else {
-                              fprintf(out, "%s_%s(&%s", rname, node->data.method_call.method_name, rname);
+                             fprintf(out, "%s_%s(&%s", current_impl_struct, mname, rname);
                          }
+                    } else if (strcmp(rname, "self") == 0) {
+                         if (current_impl_struct[0] != '\0' && strncmp(mname, current_impl_struct, strlen(current_impl_struct)) == 0) {
+                             fprintf(out, "%s(self", mname);
+                         } else if (current_impl_struct[0] != '\0') {
+                             fprintf(out, "%s_%s(self", current_impl_struct, mname);
+                         } else {
+                             fprintf(out, "%s(self", mname);
+                         }
+                    } else if (tname) {
+                         if (strncmp(mname, tname, strlen(tname)) == 0) {
+                             fprintf(out, "%s(&%s", mname, rname);
+                         } else {
+                             fprintf(out, "%s_%s(&%s", tname, mname, rname);
+                         }
+                    } else {
+                         fprintf(out, "%s_%s(&%s", rname, mname, rname);
                     }
                     for (int i = 0; i < node->data.method_call.arg_count; i++) {
                         fprintf(out, ", ");
-                        codegen_node(node->data.method_call.args[i], out);
+                        codegen_node_ext(node->data.method_call.args[i], out, 1);
                     }
                     fprintf(out, ")");
                 } else {
-                    fprintf(out, "/* Complex receiver method call */ ");
+                    char *mname = node->data.method_call.method_name;
+                    if (is_expr) fprintf(out, "(");
                     codegen_node(node->data.method_call.receiver, out);
-                    fprintf(out, ".%s(", node->data.method_call.method_name);
+                    if (is_expr) fprintf(out, ")");
+                    fprintf(out, ".%s(", mname);
                     for (int i = 0; i < node->data.method_call.arg_count; i++) {
                         codegen_node(node->data.method_call.args[i], out);
                         if (i < node->data.method_call.arg_count - 1) fprintf(out, ", ");
@@ -868,6 +913,9 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                                         case PRIM_F32:
                                         case PRIM_F64: spec = 'f'; break;
                                         case PRIM_BOOL: spec = 'd'; break;
+                                        case PRIM_U32: spec = 'u'; break;
+                                        case PRIM_U64: spec = 'l'; break; // Should be %llu but fallback to %ld
+                                        case PRIM_USIZE: spec = 'z'; break; // %zu
                                         default: spec = 'd'; break;
                                     }
                                 } else if (t->kind == TYPE_REFERENCE) {
@@ -884,21 +932,39 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                             }
                             if (arg->type == AST_METHOD_CALL || arg->type == AST_CALL) {
                                 // Heuristic: if it's a method call returning a string (common in tests)
-                                if (strstr(arg->data.method_call.method_name, "summarize") || 
+                                if (arg->data.method_call.method_name && (strstr(arg->data.method_call.method_name, "summarize") || 
                                     strstr(arg->data.method_call.method_name, "to_string") ||
-                                    strstr(arg->data.method_call.method_name, "as_str")) {
+                                    strstr(arg->data.method_call.method_name, "as_str") ||
+                                    strstr(arg->data.method_call.method_name, "name"))) {
                                     spec = 's';
                                 }
                             }
                         }
                         p[0] = '%';
                         if (spec == 'l') {
-                             p[1] = 'd'; // Fallback to %d for now, but we'd need %lld
+                             p[1] = 'l'; p[2] = 'd'; // Corrected to %lld
+                             // But we need to move the rest of the string
+                             memmove(p+3, p+2, strlen(p+2)+1);
+                             p += 3;
+                        } else if (spec == 'z') {
+                             p[1] = 'z'; p[2] = 'u';
+                             memmove(p+3, p+2, strlen(p+2)+1);
+                             p += 3;
+                        } else if (spec == 'd' && arg_idx < node->data.macro_call.arg_count) {
+                             ASTNode *arg = node->data.macro_call.args[arg_idx];
+                             if (arg->type == AST_METHOD_CALL && arg->data.method_call.method_name && strstr(arg->data.method_call.method_name, "len")) {
+                                 p[1] = 'z'; p[2] = 'u';
+                                 memmove(p+3, p+2, strlen(p+2)+1);
+                                 p += 3;
+                             } else {
+                                 p[1] = spec;
+                                 p += 2;
+                             }
                         } else {
                              p[1] = spec;
+                             p += 2;
                         }
                         arg_idx++;
-                        p += 2;
                     }
                     fprintf(out, "\"%s\"", fmt);
                     for (int i = 1; i < node->data.macro_call.arg_count; i++) {

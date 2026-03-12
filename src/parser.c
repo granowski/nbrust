@@ -671,7 +671,10 @@ void parser_init(Parser *p, Lexer *l) {
 static char *parse_type(Parser *p);
 ASTNode *parse_expression(Parser *p);
 static ASTNode *parse_expression_no_struct(Parser *p);
-ASTNode *parse_statement(Parser *p);
+static ASTNode *parse_postfix(Parser *p, int allow_struct_init);
+static ASTNode *parse_unary(Parser *p, int allow_struct_init);
+static ASTNode *parse_expression_precedence(Parser *p, int min_precedence, int allow_struct_init);
+static ASTNode *parse_primary(Parser *p, int allow_struct_init);
 static ASTNode *parse_pattern(Parser *p);
 
 // Generic parsing helpers
@@ -1006,48 +1009,11 @@ static ASTNode *parse_pattern(Parser *p) {
 ASTNode *parse_expression(Parser *p);
 
 static ASTNode *parse_primary(Parser *p, int allow_struct_init) {
-    if (p->current.type == TOKEN_BANG) {
-        consume(p, TOKEN_BANG);
-        ASTNode *expr = parse_primary(p, allow_struct_init);
-        ASTNode *node = ast_new(AST_UNOP);
-        node->data.unop.op = strdup("!");
-        node->data.unop.expr = expr;
-        return node;
-    }
-
     if (p->current.type == TOKEN_UNSAFE) {
         consume(p, TOKEN_UNSAFE);
         return parse_primary(p, allow_struct_init); // Skip unsafe in expressions too
     }
 
-    if (p->current.type == TOKEN_STAR) {
-         // Check if this is a dereference or multiplication
-         // In parse_primary, it's almost always a dereference unless it's a binary op, 
-         // which is handled by parse_expression_precedence.
-         const char *op = "*";
-         consume(p, TOKEN_STAR);
-         ASTNode *expr = parse_primary(p, allow_struct_init);
-         ASTNode *node = ast_new(AST_UNOP);
-         node->data.unop.op = strdup(op);
-         node->data.unop.expr = expr;
-         return node;
-    }
-
-    if (p->current.type == TOKEN_AMP) {
-        char buf[32] = {0};
-        strcat(buf, p->current.text);
-        consume(p, TOKEN_AMP);
-        if (p->current.type == TOKEN_MUT) {
-            strcat(buf, "mut ");
-            consume(p, TOKEN_MUT);
-        }
-        char *op = strdup(buf);
-        ASTNode *expr = parse_primary(p, allow_struct_init); 
-        ASTNode *node = ast_new(AST_UNOP);
-        node->data.unop.op = op;
-        node->data.unop.expr = expr;
-        return node;
-    }
     if (p->current.type == TOKEN_INT) {
         ASTNode *node = ast_new(AST_LITERAL);
         node->data.literal.value = strdup(p->current.text);
@@ -1084,6 +1050,13 @@ static ASTNode *parse_primary(Parser *p, int allow_struct_init) {
             } else {
                 break;
             }
+        }
+        
+        if (p->current.type == TOKEN_LT) {
+            char *type_params = parse_type(p);
+            // Just skip for now to satisfy grammar
+            free(type_params);
+            goto after_ident_label;
         }
         
         after_ident_label:
@@ -1428,12 +1401,7 @@ static int get_precedence(TokenType type) {
     }
 }
 
-static ASTNode *parse_expression_precedence(Parser *p, int min_precedence, int allow_struct_init) {
-    if (p->current.type == TOKEN_STAR && p->next.type != TOKEN_IDENT && p->next.type != TOKEN_LPAREN && p->next.type != TOKEN_LBRACE && p->next.type != TOKEN_LBRACKET) {
-         // Heuristic: unary * (deref) has higher precedence than BINOP * (mul)
-         // but let's handle it in parse_primary.
-    }
-    
+static ASTNode *parse_postfix(Parser *p, int allow_struct_init) {
     ASTNode *left = parse_primary(p, allow_struct_init);
 
     while (1) {
@@ -1461,16 +1429,8 @@ static ASTNode *parse_expression_precedence(Parser *p, int min_precedence, int a
             continue;
         }
 
-        int precedence = get_precedence(p->current.type);
-        if (precedence == 0 || precedence < min_precedence) {
-            break;
-        }
-
-        TokenType type = p->current.type;
-        char *op = strdup(p->current.text);
-        consume(p, type);
-
-        if (type == TOKEN_DOT) {
+        if (p->current.type == TOKEN_DOT) {
+            consume(p, TOKEN_DOT);
             char *field_name = strdup(p->current.text);
             consume(p, TOKEN_IDENT);
             if (p->current.type == TOKEN_LPAREN) {
@@ -1496,9 +1456,49 @@ static ASTNode *parse_expression_precedence(Parser *p, int min_precedence, int a
                 node->data.field_access.field_name = field_name;
                 left = node;
             }
-            free(op);
             continue;
         }
+        break;
+    }
+    return left;
+}
+
+static ASTNode *parse_unary(Parser *p, int allow_struct_init) {
+    if (p->current.type == TOKEN_BANG || p->current.type == TOKEN_MINUS || p->current.type == TOKEN_STAR || p->current.type == TOKEN_AMP) {
+        TokenType type = p->current.type;
+        char *op = strdup(p->current.text);
+        consume(p, type);
+        
+        char buf[32] = {0};
+        strcpy(buf, op);
+        if (type == TOKEN_AMP && p->current.type == TOKEN_MUT) {
+            strcat(buf, "mut ");
+            consume(p, TOKEN_MUT);
+            free(op);
+            op = strdup(buf);
+        }
+        
+        ASTNode *expr = parse_unary(p, allow_struct_init);
+        ASTNode *node = ast_new(AST_UNOP);
+        node->data.unop.op = op;
+        node->data.unop.expr = expr;
+        return node;
+    }
+    return parse_postfix(p, allow_struct_init);
+}
+
+static ASTNode *parse_expression_precedence(Parser *p, int min_precedence, int allow_struct_init) {
+    ASTNode *left = parse_unary(p, allow_struct_init);
+
+    while (1) {
+        int precedence = get_precedence(p->current.type);
+        if (precedence == 0 || precedence < min_precedence || p->current.type == TOKEN_DOT) {
+            break;
+        }
+
+        TokenType type = p->current.type;
+        char *op = strdup(p->current.text);
+        consume(p, type);
 
         ASTNode *right = parse_expression_precedence(p, precedence + 1, allow_struct_init);
 
@@ -1511,8 +1511,6 @@ static ASTNode *parse_expression_precedence(Parser *p, int min_precedence, int a
 
     return left;
 }
-
-static ASTNode *parse_expression_precedence(Parser *p, int min_precedence, int allow_struct_init);
 
 ASTNode *parse_expression(Parser *p) {
     return parse_expression_precedence(p, 1, 1);
