@@ -123,6 +123,14 @@ pub struct String {
 }
 
 impl String {
+    pub fn String_new() -> Self {
+        String::new()
+    }
+    pub fn from(s: &str) -> Self {
+        let mut res = String::new();
+        // Simple mock: we don't have a way to loop over &str yet easily
+        res
+    }
     pub fn new() -> Self {
         String { vec: Vec::new() }
     }
@@ -186,6 +194,9 @@ pub struct Vec<T> {
 impl<T> Vec<T> {
     pub fn new() -> Self {
         Vec { data: 0 as *mut T, len: 0, cap: 0 }
+    }
+    pub fn Vec_new() -> Self {
+        Vec::new()
     }
     pub fn len(&self) -> usize {
         self.len

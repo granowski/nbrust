@@ -767,47 +767,38 @@ void monomorphization_run(ASTNode *root) {
     if (!root) return;
     walk_and_specialize(root);
 }
-
 void monomorphization_emit_specializations(FILE *out, Target target) {
-    SpecializationNode *curr = specializations;
-    
-    // First pass: Emit forward declarations for structs and enums
-    SpecializationNode *decl_curr = specializations;
-    while (decl_curr) {
-        if (decl_curr->node->type == AST_STRUCT_DECL) {
-            fprintf(out, "struct %s;\n", decl_curr->mangled_name);
-        } else if (decl_curr->node->type == AST_ENUM_DECL) {
-            fprintf(out, "struct %s;\n", decl_curr->mangled_name);
-            fprintf(out, "#ifndef TAG_%s_DEFINED\n", decl_curr->mangled_name);
-            fprintf(out, "#define TAG_%s_DEFINED\n", decl_curr->mangled_name);
-            fprintf(out, "enum %s_tag { TAG_%s_NONE", decl_curr->mangled_name, decl_curr->mangled_name);
-            for (int i = 0; i < decl_curr->node->data.enum_decl.variant_count; i++) {
-                fprintf(out, ", TAG_%s_%s", decl_curr->mangled_name, decl_curr->node->data.enum_decl.variants[i]->data.enum_variant.name);
+    // Zero pass: Forward declare all specialized types to avoid incomplete type errors
+    SpecializationNode *fwd_curr = specializations;
+    while (fwd_curr) {
+        if (fwd_curr->node->type == AST_STRUCT_DECL || fwd_curr->node->type == AST_ENUM_DECL) {
+             fprintf(out, "struct %s;\n", fwd_curr->mangled_name);
+        }
+        fwd_curr = fwd_curr->next;
+    }
+    fprintf(out, "\n");
+
+    // First pass: Emit tag definitions for enums
+    SpecializationNode *tag_curr = specializations;
+    while (tag_curr) {
+        if (tag_curr->node->type == AST_ENUM_DECL) {
+            fprintf(out, "#ifndef TAG_%s_DEFINED\n", tag_curr->mangled_name);
+            fprintf(out, "#define TAG_%s_DEFINED\n", tag_curr->mangled_name);
+            fprintf(out, "enum %s_tag { TAG_%s_NONE", tag_curr->mangled_name, tag_curr->mangled_name);
+            for (int i = 0; i < tag_curr->node->data.enum_decl.variant_count; i++) {
+                fprintf(out, ", TAG_%s_%s", tag_curr->mangled_name, tag_curr->node->data.enum_decl.variants[i]->data.enum_variant.name);
             }
             fprintf(out, " };\n");
             fprintf(out, "#endif\n");
         }
-        decl_curr = decl_curr->next;
+        tag_curr = tag_curr->next;
     }
     fprintf(out, "\n");
 
-    // Second pass: Emit actual definitions
+    // Second pass: Emit ALL specialized nodes (Types then Functions)
     SpecializationNode *emit_curr = specializations;
     while (emit_curr) {
-        if (emit_curr->node->type == AST_STRUCT_DECL || emit_curr->node->type == AST_ENUM_DECL) {
-             fprintf(stderr, "Emitting specialization definition: %s\n", emit_curr->mangled_name);
-             codegen_generate(emit_curr->node, out, target, NULL);
-        }
+        codegen_generate(emit_curr->node, out, target, NULL);
         emit_curr = emit_curr->next;
-    }
-
-    // Third pass: Emit functions
-    SpecializationNode *func_curr = specializations;
-    while (func_curr) {
-        if (func_curr->node->type == AST_FUNC) {
-             fprintf(stderr, "Emitting specialization function: %s\n", func_curr->mangled_name);
-             codegen_generate(func_curr->node, out, target, NULL);
-        }
-        func_curr = func_curr->next;
     }
 }

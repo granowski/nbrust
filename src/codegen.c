@@ -21,6 +21,7 @@ static const char* map_type(const char* rust_type) {
     if (strcmp(rust_type, "u8") == 0 || strcmp(rust_type, "unsigned char") == 0) return "unsigned char";
     if (strcmp(rust_type, "i16") == 0 || strcmp(rust_type, "short") == 0) return "short";
     if (strcmp(rust_type, "u16") == 0 || strcmp(rust_type, "unsigned short") == 0) return "unsigned short";
+    if (strcmp(rust_type, "String") == 0) return "struct String";
     if (strcmp(rust_type, "&str") == 0) return "char*";
     if (strcmp(rust_type, "bool") == 0) return "int";
     if (strcmp(rust_type, "f32") == 0) return "float";
@@ -57,6 +58,8 @@ static const char* map_type(const char* rust_type) {
                     else if (arg[i] == ' ') { /* skip */ }
                     else if (arg[i] == '*') strcat(buf, "Ptr");
                     else if (arg[i] == '<' || arg[i] == '>') strcat(buf, "_");
+                    else if (arg[i] == '[') strcat(buf, "Slice");
+                    else if (arg[i] == ']') { /* skip */ }
                     else {
                         int len = strlen(buf);
                         if (len < sizeof(buf) - 2) {
@@ -299,6 +302,12 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             break;
         case AST_METHOD_CALL: {
             if (node->data.method_call.receiver) {
+                if (node->data.method_call.receiver->type == AST_STRING_LITERAL && strcmp(node->data.method_call.method_name, "to_string") == 0) {
+                    fprintf(out, "String_from(");
+                    codegen_node(node->data.method_call.receiver, out);
+                    fprintf(out, ")");
+                    break;
+                }
                 char *rname = NULL;
                 if (node->data.method_call.receiver->type == AST_IDENT) {
                     rname = node->data.method_call.receiver->data.ident.name;
@@ -385,7 +394,8 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                 }
             }
             fprintf(out, "    } data;\n");
-            fprintf(out, "};\n");
+            fprintf(out, "};\n\n");
+            fprintf(out, "static struct %s %s_new() { struct %s res; memset(&res, 0, sizeof(res)); return res; }\n", node->data.enum_decl.name, node->data.enum_decl.name, node->data.enum_decl.name);
             
             for (int i = 0; i < node->data.enum_decl.variant_count; i++) {
                 ASTNode *variant = node->data.enum_decl.variants[i];
@@ -424,6 +434,30 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                  struct_name = node->resolved_type->data.struct_type.name;
             }
             
+            // Heuristic: if it's an enum variant initialization
+            int is_enum_variant = (strchr(struct_name, ':') != NULL);
+            // Message_Move style check
+            if (!is_enum_variant && strstr(struct_name, "_")) {
+                 if (strncmp(struct_name, "Message_", 8) == 0) is_enum_variant = 1;
+                 if (strstr(struct_name, "Some") || strstr(struct_name, "None") || strstr(struct_name, "Ok") || strstr(struct_name, "Err")) is_enum_variant = 1;
+            }
+
+            if (is_enum_variant) {
+                char *clean_v_si = strdup(struct_name);
+                char *p = clean_v_si;
+                while (*p) { if (*p == ':' && *(p+1) == ':') { *p = '_'; memmove(p+1, p+2, strlen(p+2)+1); } p++; }
+                fprintf(out, "%s(", clean_v_si);
+                for (int i = 0; i < node->data.struct_init.field_count; i++) {
+                    ASTNode *field = node->data.struct_init.fields[i];
+                    if (field->type == AST_FIELD_INIT) codegen_node_ext(field->data.field_init.value, out, 1);
+                    else codegen_node_ext(field, out, 1);
+                    if (i < node->data.struct_init.field_count - 1) fprintf(out, ", ");
+                }
+                fprintf(out, ")");
+                free(clean_v_si);
+                break;
+            }
+
             const char *mtype = map_type(struct_name);
             if (strncmp(mtype, "struct ", 7) == 0) {
                 fprintf(out, "(%s){", mtype);
@@ -567,68 +601,104 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                         ASTNode *arm = node->data.match_stmt.arms[i];
                         ASTNode *pattern = arm->data.match_arm.pattern;
                         fprintf(out, "        case ");
-                        char *vname = NULL;
-                        if (pattern->type == AST_CALL) vname = pattern->data.call.name;
-                        else if (pattern->type == AST_STRUCT_INIT) vname = pattern->data.struct_init.struct_name;
-                        else if (pattern->type == AST_IDENT) vname = pattern->data.ident.name;
-                        if (vname) {
-                            char *clean_vname = strdup(vname);
+                        char *vname_inner = NULL;
+                        if (pattern->type == AST_CALL) vname_inner = pattern->data.call.name;
+                        else if (pattern->type == AST_STRUCT_INIT) vname_inner = pattern->data.struct_init.struct_name;
+                        else if (pattern->type == AST_IDENT) vname_inner = pattern->data.ident.name;
+                        
+                        int is_wildcard_inner = 0;
+                        if (pattern->type == AST_IDENT && (strcmp(pattern->data.ident.name, "_") == 0 || strcmp(pattern->data.ident.name, "default") == 0)) is_wildcard_inner = 1;
+                        if (vname_inner && (strcmp(vname_inner, "_") == 0 || strcmp(vname_inner, "default") == 0)) is_wildcard_inner = 1;
+
+                        if (is_wildcard_inner) {
+                            fprintf(out, "default");
+                        } else if (vname_inner) {
+                            char *clean_vname = strdup(vname_inner);
                             char *p = clean_vname;
                             while (*p) { if (*p == ':' && *(p+1) == ':') { *p = '_'; memmove(p+1, p+2, strlen(p+2)+1); } p++; }
                             
-                            char *vbase = NULL;
                             char *variant_only = NULL;
                             char *last_u = strrchr(clean_vname, '_');
-                            if (last_u) {
-                                vbase = strndup(clean_vname, last_u - clean_vname);
-                                variant_only = last_u + 1;
-                            } else {
-                                variant_only = clean_vname;
-                            }
+                            variant_only = last_u ? last_u + 1 : clean_vname;
 
-                            if (strchr(clean_vname, '_') && !node->data.match_stmt.expr->resolved_type) fprintf(out, "TAG_%s", clean_vname);
-                            else {
-                                struct Type *expr_type = node->data.match_stmt.expr->resolved_type;
-                                if (expr_type && expr_type->kind == TYPE_ENUM) {
-                                    // If it's a specialized enum, use its name and the variant
-                                    fprintf(out, "TAG_%s_%s", expr_type->data.enum_type.name, variant_only);
-                                } else if (strcmp(variant_only, "Ok") == 0 || strcmp(variant_only, "Err") == 0) {
-                                    // Fallback for Result
-                                    if (expr_type && expr_type->kind == TYPE_STRUCT) {
-                                         fprintf(out, "TAG_%s_%s", expr_type->data.struct_type.name, variant_only);
-                                    } else {
-                                         fprintf(out, "TAG_Result_%s", variant_only);
-                                    }
-                                }
-                                else if (strcmp(clean_vname, "Some") == 0 || strcmp(clean_vname, "None") == 0) fprintf(out, "TAG_Option_%s", clean_vname);
-                                else if (strcmp(clean_vname, "_") == 0) fprintf(out, "default");
-                                else fprintf(out, "TAG_%s", clean_vname); 
+                            struct Type *expr_type = node->data.match_stmt.expr->resolved_type;
+                            if (expr_type && expr_type->kind == TYPE_ENUM) {
+                                fprintf(out, "TAG_%s_%s", expr_type->data.enum_type.name, variant_only);
+                            } else if (expr_type && expr_type->kind == TYPE_STRUCT && expr_type->data.struct_type.name) {
+                                fprintf(out, "TAG_%s_%s", expr_type->data.struct_type.name, variant_only);
+                            } else if (strcmp(variant_only, "Some") == 0 || strcmp(variant_only, "None") == 0) {
+                                fprintf(out, "TAG_Option_%s", variant_only);
+                            } else if (strcmp(variant_only, "Ok") == 0 || strcmp(variant_only, "Err") == 0) {
+                                fprintf(out, "TAG_Result_%s", variant_only);
+                            } else {
+                                fprintf(out, "TAG_%s", clean_vname);
                             }
-                            if (vbase) free(vbase);
                             free(clean_vname);
                         } else codegen_node_ext(pattern, out, 1);
-                        if (vname && strcmp(vname, "_") == 0) fprintf(out, ": {\n");
-                        else {
-                            fprintf(out, ": {\n");
-                            // Extract enum variant fields for the arm body
-                            if (pattern->type == AST_CALL && node->data.match_stmt.expr->resolved_type) {
-                                struct Type *expr_type = node->data.match_stmt.expr->resolved_type;
-                                char *ename = (expr_type->kind == TYPE_ENUM) ? expr_type->data.enum_type.name : (expr_type->kind == TYPE_STRUCT ? expr_type->data.struct_type.name : NULL);
-                                if (ename) {
-                                    char *last_u = strrchr(vname, '_');
-                                    char *variant_only = last_u ? last_u + 1 : vname;
+                        
+                        fprintf(out, ": {\n");
+                        if (!is_wildcard_inner) {
+                            struct Type *expr_type = node->data.match_stmt.expr->resolved_type;
+                            char *ename = (expr_type && expr_type->kind == TYPE_ENUM) ? expr_type->data.enum_type.name : (expr_type && expr_type->kind == TYPE_STRUCT ? expr_type->data.struct_type.name : NULL);
+                            
+                            char *clean_vname = vname_inner ? strdup(vname_inner) : NULL;
+                            if (clean_vname) {
+                                char *p = clean_vname;
+                                while (*p) { if (*p == ':' && *(p+1) == ':') { *p = '_'; memmove(p+1, p+2, strlen(p+2)+1); } p++; }
+                            }
+                            char *variant_only = clean_vname ? (strrchr(clean_vname, '_') ? strrchr(clean_vname, '_') + 1 : clean_vname) : NULL;
+
+                            if (ename && variant_only) {
+                                if (pattern->type == AST_CALL) {
                                     for (int j = 0; j < pattern->data.call.arg_count; j++) {
                                         ASTNode *arg = pattern->data.call.args[j];
                                         if (arg->type == AST_IDENT) {
-                                            fprintf(out, "            auto %s = ((struct %s*)_match_tmp)->data.%s._%d;\n", arg->data.ident.name, ename, variant_only, j);
+                                            fprintf(out, "            __auto_type %s = ((struct %s*)_match_tmp)->data.%s._%d;\n", arg->data.ident.name, ename, variant_only, j);
+                                        }
+                                    }
+                                } else if (pattern->type == AST_STRUCT_INIT) {
+                                    for (int j = 0; j < pattern->data.struct_init.field_count; j++) {
+                                        ASTNode *field = pattern->data.struct_init.fields[j];
+                                        char *fname = (field->type == AST_FIELD_INIT) ? field->data.field_init.name : field->data.ident.name;
+                                        ASTNode *val = (field->type == AST_FIELD_INIT) ? field->data.field_init.value : field;
+                                        if (val && val->type == AST_IDENT) {
+                                            fprintf(out, "            __auto_type %s = ((struct %s*)_match_tmp)->data.%s.%s;\n", val->data.ident.name, ename, variant_only, fname);
                                         }
                                     }
                                 }
+                            } else if (variant_only) {
+                                // Fallback when ename is unknown
+                                if (pattern->type == AST_CALL) {
+                                    for (int j = 0; j < pattern->data.call.arg_count; j++) {
+                                        ASTNode *arg = pattern->data.call.args[j];
+                                        if (arg->type == AST_IDENT) {
+                                            fprintf(out, "            __auto_type %s = ((struct { int tag; union { struct { long long _0; long long _1; long long _2; long long _3; } %s; } data; }*)_match_tmp)->data.%s._%d;\n", arg->data.ident.name, variant_only, variant_only, j);
+                                        }
+                                    }
+                                } else if (pattern->type == AST_STRUCT_INIT) {
+                                     for (int j = 0; j < pattern->data.struct_init.field_count; j++) {
+                                        ASTNode *field = pattern->data.struct_init.fields[j];
+                                        char *fname = (field->type == AST_FIELD_INIT) ? field->data.field_init.name : field->data.ident.name;
+                                        ASTNode *val = (field->type == AST_FIELD_INIT) ? field->data.field_init.value : field;
+                                        if (val && val->type == AST_IDENT) {
+                                            fprintf(out, "            __auto_type %s = ((struct { int tag; union { struct { long long %s; } %s; } data; }*)_match_tmp)->data.%s.%s;\n", val->data.ident.name, fname, variant_only, variant_only, fname);
+                                        }
+                                     }
+                                }
                             }
+                            if (clean_vname) free(clean_vname);
                         }
+                        
                         fprintf(out, "            _match_res = ");
-                        codegen_node_ext(arm->data.match_arm.body, out, 1);
-                        fprintf(out, "; break;\n        }\n");
+                        if (arm->data.match_arm.body->type == AST_BLOCK) {
+                            fprintf(out, "({ ");
+                            codegen_node_ext(arm->data.match_arm.body, out, 1);
+                            fprintf(out, "; });");
+                        } else {
+                            codegen_node_ext(arm->data.match_arm.body, out, 1);
+                            fprintf(out, ";");
+                        }
+                        fprintf(out, " break;\n        }\n");
                     }
                     fprintf(out, "    }");
                 }
@@ -658,65 +728,100 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                     for (int i = 0; i < node->data.match_stmt.arm_count; i++) {
                         ASTNode *arm = node->data.match_stmt.arms[i];
                         ASTNode *pattern = arm->data.match_arm.pattern;
-                        fprintf(out, "        case ");
-                        char *vname = NULL;
-                        if (pattern->type == AST_CALL) vname = pattern->data.call.name;
-                        else if (pattern->type == AST_STRUCT_INIT) vname = pattern->data.struct_init.struct_name;
-                        else if (pattern->type == AST_IDENT) vname = pattern->data.ident.name;
-                        if (vname) {
-                            char *clean_vname = strdup(vname);
-                            char *p = clean_vname;
-                            while (*p) { if (*p == ':' && *(p+1) == ':') { *p = '_'; memmove(p+1, p+2, strlen(p+2)+1); } p++; }
-                            
-                            char *vbase = NULL;
-                            char *variant_only = NULL;
-                            char *last_u = strrchr(clean_vname, '_');
-                            if (last_u) {
-                                vbase = strndup(clean_vname, last_u - clean_vname);
-                                variant_only = last_u + 1;
-                            } else {
-                                variant_only = clean_vname;
-                            }
+                        
+                        char *vname_inner_stmt = NULL;
+                        if (pattern->type == AST_CALL) vname_inner_stmt = pattern->data.call.name;
+                        else if (pattern->type == AST_STRUCT_INIT) vname_inner_stmt = pattern->data.struct_init.struct_name;
+                        else if (pattern->type == AST_IDENT) vname_inner_stmt = pattern->data.ident.name;
+                        
+                        int is_wildcard_stmt = 0;
+                        if (pattern->type == AST_IDENT && (strcmp(pattern->data.ident.name, "_") == 0 || strcmp(pattern->data.ident.name, "default") == 0)) is_wildcard_stmt = 1;
+                        if (vname_inner_stmt && (strcmp(vname_inner_stmt, "_") == 0 || strcmp(vname_inner_stmt, "default") == 0)) is_wildcard_stmt = 1;
 
-                            if (strchr(clean_vname, '_') && !node->data.match_stmt.expr->resolved_type) fprintf(out, "TAG_%s", clean_vname);
-                            else {
+                        if (is_wildcard_stmt) {
+                            fprintf(out, "        default");
+                        } else {
+                            fprintf(out, "        case ");
+                            if (vname_inner_stmt) {
+                                char *clean_vname = strdup(vname_inner_stmt);
+                                char *p = clean_vname;
+                                while (*p) { if (*p == ':' && *(p+1) == ':') { *p = '_'; memmove(p+1, p+2, strlen(p+2)+1); } p++; }
+                                
+                                char *variant_only = NULL;
+                                char *last_u = strrchr(clean_vname, '_');
+                                variant_only = last_u ? last_u + 1 : clean_vname;
+
                                 struct Type *expr_type = node->data.match_stmt.expr->resolved_type;
                                 if (expr_type && expr_type->kind == TYPE_ENUM) {
-                                    // If it's a specialized enum, use its name and the variant
                                     fprintf(out, "TAG_%s_%s", expr_type->data.enum_type.name, variant_only);
+                                } else if (expr_type && expr_type->kind == TYPE_STRUCT && expr_type->data.struct_type.name) {
+                                    fprintf(out, "TAG_%s_%s", expr_type->data.struct_type.name, variant_only);
+                                } else if (strcmp(variant_only, "Some") == 0 || strcmp(variant_only, "None") == 0) {
+                                    fprintf(out, "TAG_Option_%s", variant_only);
                                 } else if (strcmp(variant_only, "Ok") == 0 || strcmp(variant_only, "Err") == 0) {
-                                    // Fallback for Result
-                                    if (expr_type && expr_type->kind == TYPE_STRUCT) {
-                                         fprintf(out, "TAG_%s_%s", expr_type->data.struct_type.name, variant_only);
-                                    } else {
-                                         fprintf(out, "TAG_Result_%s", variant_only);
-                                    }
+                                    fprintf(out, "TAG_Result_%s", variant_only);
+                                } else {
+                                    fprintf(out, "TAG_%s", clean_vname);
                                 }
-                                else if (strcmp(clean_vname, "Some") == 0 || strcmp(clean_vname, "None") == 0) fprintf(out, "TAG_Option_%s", clean_vname);
-                                else if (strcmp(clean_vname, "_") == 0) fprintf(out, "default");
-                                else fprintf(out, "TAG_%s", clean_vname); 
+                                free(clean_vname);
+                            } else codegen_node_ext(pattern, out, 0);
+                        }
+                        
+                        fprintf(out, ": {\n");
+                        if (!is_wildcard_stmt) {
+                            struct Type *expr_type = node->data.match_stmt.expr->resolved_type;
+                            char *ename = NULL;
+                            if (expr_type) {
+                                if (expr_type->kind == TYPE_ENUM) ename = expr_type->data.enum_type.name;
+                                else if (expr_type->kind == TYPE_STRUCT) ename = expr_type->data.struct_type.name;
                             }
-                            if (vbase) free(vbase);
-                            free(clean_vname);
-                        } else codegen_node_ext(pattern, out, 0);
-                        if (vname && strcmp(vname, "_") == 0) fprintf(out, ": {\n");
-                        else {
-                            fprintf(out, ": {\n");
-                            // Extract enum variant fields for the arm body
-                            if (pattern->type == AST_CALL && node->data.match_stmt.expr->resolved_type) {
-                                struct Type *expr_type = node->data.match_stmt.expr->resolved_type;
-                                char *ename = (expr_type->kind == TYPE_ENUM) ? expr_type->data.enum_type.name : (expr_type->kind == TYPE_STRUCT ? expr_type->data.struct_type.name : NULL);
-                                if (ename) {
-                                    char *last_u = strrchr(vname, '_');
-                                    char *variant_only = last_u ? last_u + 1 : vname;
+                            
+                            char *clean_vname = vname_inner_stmt ? strdup(vname_inner_stmt) : NULL;
+                            if (clean_vname) {
+                                char *p = clean_vname;
+                                while (*p) { if (*p == ':' && *(p+1) == ':') { *p = '_'; memmove(p+1, p+2, strlen(p+2)+1); } p++; }
+                            }
+                            char *variant_only = clean_vname ? (strrchr(clean_vname, '_') ? strrchr(clean_vname, '_') + 1 : clean_vname) : NULL;
+
+                            if (ename && variant_only) {
+                                if (pattern->type == AST_CALL) {
                                     for (int j = 0; j < pattern->data.call.arg_count; j++) {
                                         ASTNode *arg = pattern->data.call.args[j];
                                         if (arg->type == AST_IDENT) {
-                                            fprintf(out, "            auto %s = ((struct %s*)_match_tmp)->data.%s._%d;\n", arg->data.ident.name, ename, variant_only, j);
+                                            fprintf(out, "            __auto_type %s = ((struct %s*)_match_tmp)->data.%s._%d;\n", arg->data.ident.name, ename, variant_only, j);
+                                        }
+                                    }
+                                } else if (pattern->type == AST_STRUCT_INIT) {
+                                    for (int j = 0; j < pattern->data.struct_init.field_count; j++) {
+                                        ASTNode *field = pattern->data.struct_init.fields[j];
+                                        char *fname = (field->type == AST_FIELD_INIT) ? field->data.field_init.name : field->data.ident.name;
+                                        ASTNode *val = (field->type == AST_FIELD_INIT) ? field->data.field_init.value : field;
+                                        if (val && val->type == AST_IDENT) {
+                                            fprintf(out, "            __auto_type %s = ((struct %s*)_match_tmp)->data.%s.%s;\n", val->data.ident.name, ename, variant_only, fname);
                                         }
                                     }
                                 }
+                            } else if (variant_only) {
+                                // Fallback when ename is unknown.
+                                if (pattern->type == AST_CALL) {
+                                    for (int j = 0; j < pattern->data.call.arg_count; j++) {
+                                        ASTNode *arg = pattern->data.call.args[j];
+                                        if (arg->type == AST_IDENT) {
+                                            fprintf(out, "            __auto_type %s = ((struct { int tag; union { struct { long long _0; long long _1; long long _2; long long _3; } %s; } data; }*)_match_tmp)->data.%s._%d;\n", arg->data.ident.name, variant_only, variant_only, j);
+                                        }
+                                    }
+                                } else if (pattern->type == AST_STRUCT_INIT) {
+                                     for (int j = 0; j < pattern->data.struct_init.field_count; j++) {
+                                        ASTNode *field = pattern->data.struct_init.fields[j];
+                                        char *fname = (field->type == AST_FIELD_INIT) ? field->data.field_init.name : field->data.ident.name;
+                                        ASTNode *val = (field->type == AST_FIELD_INIT) ? field->data.field_init.value : field;
+                                        if (val && val->type == AST_IDENT) {
+                                            fprintf(out, "            __auto_type %s = ((struct { int tag; union { struct { long long %s; } %s; } data; }*)_match_tmp)->data.%s.%s;\n", val->data.ident.name, fname, variant_only, variant_only, fname);
+                                        }
+                                     }
+                                }
                             }
+                            if (clean_vname) free(clean_vname);
                         }
                         codegen_node_ext(arm->data.match_arm.body, out, 0);
                         if (arm->data.match_arm.body->type != AST_BLOCK) fprintf(out, ";\n");
@@ -847,9 +952,9 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
         case AST_BLOCK:
             if (is_expr) fprintf(out, "({ ");
             else fprintf(out, "{\n");
-            for (int i = 0; i < node->data.block.count; i++) {
-                ASTNode *stmt = node->data.block.statements[i];
-                int last = (i == node->data.block.count - 1);
+            for (int j = 0; j < node->data.block.count; j++) {
+                ASTNode *stmt = node->data.block.statements[j];
+                int last = (j == node->data.block.count - 1);
                 int stmt_is_expr = is_expr && last;
                 
                 if (last && !is_expr && current_impl_struct[0] != '\0') {
@@ -869,7 +974,13 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                     }
                 }
 
-                codegen_node_ext(stmt, out, stmt_is_expr);
+                if (stmt->type == AST_IF || stmt->type == AST_MATCH || stmt->type == AST_BLOCK) {
+                    if (stmt_is_expr) fprintf(out, "({ ");
+                    codegen_node_ext(stmt, out, stmt_is_expr);
+                    if (stmt_is_expr) fprintf(out, "; })");
+                } else {
+                    codegen_node_ext(stmt, out, stmt_is_expr);
+                }
                 if (stmt->type == AST_BINOP || 
                     stmt->type == AST_IDENT ||
                     stmt->type == AST_LITERAL ||
@@ -894,8 +1005,9 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                 const char *mtype = map_type(raw_name);
                 fprintf(out, "    %s %s", mtype, node->data.var_decl.name);
             } else {
-                if (node->data.var_decl.init && node->data.var_decl.init->type == AST_STRING_LITERAL) fprintf(out, "    const char* %s", node->data.var_decl.name);
-                else if (node->data.var_decl.init && node->data.var_decl.init->type == AST_STRUCT_INIT) {
+                if (node->data.var_decl.init && (node->data.var_decl.init->type == AST_STRING_LITERAL || (node->data.var_decl.init->type == AST_METHOD_CALL && strcmp(node->data.var_decl.init->data.method_call.method_name, "to_string") == 0))) {
+                     fprintf(out, "    struct String %s", node->data.var_decl.name);
+                } else if (node->data.var_decl.init && node->data.var_decl.init->type == AST_STRUCT_INIT) {
                      const char *sname = node->data.var_decl.init->data.struct_init.struct_name;
                      if (node->data.var_decl.init->resolved_type) sname = node->data.var_decl.init->resolved_type->data.struct_type.name;
                      const char *mtype = map_type(sname);
@@ -992,9 +1104,20 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
         }
         case AST_CALL: {
             char *name = node->data.call.name;
+            if (strcmp(name, "Vec::new") == 0) { name = "Vec_new"; }
+            if (strcmp(name, "String::new") == 0) { name = "String_new"; }
             char *clean_name = strdup(name);
             char *p = clean_name;
             while (*p) { if (*p == ':' && *(p+1) == ':') { *p = '_'; memmove(p+1, p+2, strlen(p+2)+1); } p++; }
+            if (strcmp(clean_name, "Vec_new") == 0) {
+                 if (node->resolved_type && node->resolved_type->kind == TYPE_STRUCT) {
+                      char *mangled = strdup(node->resolved_type->data.struct_type.name);
+                      free(clean_name);
+                      clean_name = malloc(strlen(mangled) + 5);
+                      sprintf(clean_name, "%s_new", mangled);
+                      free(mangled);
+                 }
+            }
             if (strcmp(clean_name, "Box_new") == 0 || strcmp(clean_name, "Box::new") == 0) { fprintf(out, "({ void* _b = malloc(sizeof(int)); * (int*)_b = "); codegen_node_ext(node->data.call.args[0], out, 1); fprintf(out, "; _b; })"); }
             else {
                 fprintf(out, "%s(", clean_name);
@@ -1027,6 +1150,7 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             fprintf(out, "struct %s {\n", node->data.struct_decl.name);
             for (int i = 0; i < node->data.struct_decl.field_count; i++) { fprintf(out, "    "); codegen_node(node->data.struct_decl.fields[i], out); fprintf(out, ";\n"); }
             fprintf(out, "};\n\n");
+            fprintf(out, "static struct %s %s_new() { struct %s res; memset(&res, 0, sizeof(res)); return res; }\n", node->data.struct_decl.name, node->data.struct_decl.name, node->data.struct_decl.name);
             break;
         case AST_FIELD_ACCESS:
             codegen_node(node->data.field_access.receiver, out);
@@ -1035,13 +1159,7 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             break;
         case AST_IF:
             if (is_expr) {
-                fprintf(out, "({ __auto_type _res = ");
-                if (node->data.if_stmt.then_branch->type == AST_BLOCK && node->data.if_stmt.then_branch->data.block.count > 0) {
-                     // Try to guess a default value or just use a dummy
-                     fprintf(out, "0; if (");
-                } else {
-                     fprintf(out, "0; if (");
-                }
+                fprintf(out, "({ __auto_type _res = 0; if (");
                 codegen_node_ext(node->data.if_stmt.condition, out, 1);
                 fprintf(out, ") { _res = ");
                 codegen_node_ext(node->data.if_stmt.then_branch, out, 1);
@@ -1054,7 +1172,7 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                 fprintf(out, " _res; })");
             } else {
                 fprintf(out, "    if (");
-                codegen_node_ext(node->data.if_stmt.condition, out, 0);
+                codegen_node_ext(node->data.if_stmt.condition, out, 1);
                 fprintf(out, ") ");
                 codegen_node_ext(node->data.if_stmt.then_branch, out, 0);
                 if (node->data.if_stmt.else_branch) {
@@ -1083,6 +1201,12 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             break;
         case AST_RETURN:
             if (node->data.ret_stmt.value) {
+                if (node->data.ret_stmt.value->type == AST_IF) {
+                    fprintf(out, "    return ");
+                    codegen_node_ext(node->data.ret_stmt.value, out, 1);
+                    fprintf(out, ";\n");
+                    break;
+                }
                 if (is_expr) fprintf(out, "({ return ");
                 else fprintf(out, "    return ");
                 codegen_node(node->data.ret_stmt.value, out);

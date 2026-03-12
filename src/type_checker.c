@@ -73,6 +73,7 @@ static Type *check_node(ASTNode *node) {
                 result = type_new(TYPE_UNKNOWN);
             } else {
                 result = s->type;
+                node->resolved_type = result;
             }
             break;
         }
@@ -205,7 +206,9 @@ static Type *check_node(ASTNode *node) {
             if (!s) {
                 s = symbol_table_lookup(current_table, node->data.call.name);
             }
-            if (!s || s->type->kind != TYPE_FUNCTION) {
+            if (s && s->type->kind == TYPE_ENUM) {
+                result = s->type;
+            } else if (!s || s->type->kind != TYPE_FUNCTION) {
                 // Heuristic for built-in or unknown functions
                 result = type_primitive(PRIM_I32);
             } else {
@@ -264,7 +267,16 @@ static Type *check_node(ASTNode *node) {
             break;
         }
         case AST_STRUCT_INIT: {
-            Type *t = symbol_table_lookup(current_table, node->data.struct_init.struct_name) ? symbol_table_lookup(current_table, node->data.struct_init.struct_name)->type : type_struct(node->data.struct_init.struct_name);
+            Symbol *s = symbol_table_lookup(current_table, node->data.struct_init.struct_name);
+            if (!s) {
+                // Try variant lookup Message::Move -> Message_Move
+                char *alt_name = strdup(node->data.struct_init.struct_name);
+                char *p = alt_name;
+                while (*p) { if (*p == ':' && *(p+1) == ':') { *p = '_'; memmove(p+1, p+2, strlen(p+2)+1); } p++; }
+                s = symbol_table_lookup(current_table, alt_name);
+                free(alt_name);
+            }
+            Type *t = s ? s->type : type_struct(node->data.struct_init.struct_name);
             for (int i = 0; i < node->data.struct_init.field_count; i++) {
                 check_node(node->data.struct_init.fields[i]);
             }
