@@ -105,12 +105,30 @@ int main(int argc, char **argv) {
          macro_expand_run(all_nodes[i]);
     }
     fprintf(stderr, "Running monomorphization...\n");
-    fflush(stderr);
     for (int i = 0; i < all_node_count; i++) {
          fprintf(stderr, "  node %d\n", i);
          fflush(stderr);
          monomorphization_run(all_nodes[i]);
     }
+
+    // Second pass to catch specializations triggered by first pass (e.g. specialized functions calling other generics)
+    fprintf(stderr, "Running monomorphization second pass...\n");
+    for (int i = 0; i < all_node_count; i++) {
+         monomorphization_run(all_nodes[i]);
+    }
+
+    // Filter out original generic nodes
+    int filtered_count = 0;
+    for (int i = 0; i < all_node_count; i++) {
+        ASTNode *node = all_nodes[i];
+        int is_generic = 0;
+        if (node->type == AST_STRUCT_DECL && node->data.struct_decl.generic_param_count > 0) is_generic = 1;
+        if (node->type == AST_ENUM_DECL && node->data.enum_decl.generic_param_count > 0) is_generic = 1;
+        if (node->type == AST_FUNC && node->data.func.generic_param_count > 0) is_generic = 1;
+        if (!is_generic) all_nodes[filtered_count++] = node;
+    }
+    all_node_count = filtered_count;
+
     fprintf(stderr, "Running type checker...\n");
     fflush(stderr);
     for (int i = 0; i < all_node_count; i++) {
@@ -139,8 +157,11 @@ int main(int argc, char **argv) {
         if (target.backend == BACKEND_C) {
             fprintf(f, "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n");
             fprintf(f, "typedef int i32;\ntypedef long long i64;\ntypedef unsigned int u32;\ntypedef unsigned long long u64;\ntypedef size_t usize;\n");
-            monomorphization_emit_specializations(f, target);
         }
+
+        // Monomorphization emit needs to happen after we've processed all nodes
+        // but before we generate code for them, so specialized structs are defined.
+        if (target.backend == BACKEND_C) monomorphization_emit_specializations(f, target);
 
         for (int i = 0; i < all_node_count; i++) {
             ASTNode *ast = all_nodes[i];

@@ -107,21 +107,23 @@ ASTNode *ast_clone(ASTNode *node) {
         case AST_STRUCT_DECL:
             new_node->data.struct_decl.name = safe_strdup(node->data.struct_decl.name);
             new_node->data.struct_decl.field_count = node->data.struct_decl.field_count;
-            if (node->data.struct_decl.fields) {
+            if (node->data.struct_decl.fields && node->data.struct_decl.field_count > 0) {
                 new_node->data.struct_decl.fields = malloc(sizeof(ASTNode*) * node->data.struct_decl.field_count);
                 for (int i = 0; i < node->data.struct_decl.field_count; i++) {
                     new_node->data.struct_decl.fields[i] = ast_clone(node->data.struct_decl.fields[i]);
                 }
+            } else {
+                new_node->data.struct_decl.fields = NULL;
             }
             new_node->data.struct_decl.generic_param_count = node->data.struct_decl.generic_param_count;
-            if (node->data.struct_decl.generic_params) {
+            if (node->data.struct_decl.generic_params && node->data.struct_decl.generic_param_count > 0) {
                 new_node->data.struct_decl.generic_params = malloc(sizeof(char*) * node->data.struct_decl.generic_param_count);
                 new_node->data.struct_decl.generic_bounds = malloc(sizeof(ASTNode**) * node->data.struct_decl.generic_param_count);
                 new_node->data.struct_decl.generic_bounds_counts = malloc(sizeof(int) * node->data.struct_decl.generic_param_count);
                 for (int i = 0; i < node->data.struct_decl.generic_param_count; i++) {
                     new_node->data.struct_decl.generic_params[i] = safe_strdup(node->data.struct_decl.generic_params[i]);
                     new_node->data.struct_decl.generic_bounds_counts[i] = node->data.struct_decl.generic_bounds_counts[i];
-                    if (node->data.struct_decl.generic_bounds[i]) {
+                    if (node->data.struct_decl.generic_bounds[i] && node->data.struct_decl.generic_bounds_counts[i] > 0) {
                         new_node->data.struct_decl.generic_bounds[i] = malloc(sizeof(ASTNode*) * node->data.struct_decl.generic_bounds_counts[i]);
                         for (int j = 0; j < node->data.struct_decl.generic_bounds_counts[i]; j++) {
                             new_node->data.struct_decl.generic_bounds[i][j] = ast_clone(node->data.struct_decl.generic_bounds[i][j]);
@@ -130,13 +132,19 @@ ASTNode *ast_clone(ASTNode *node) {
                         new_node->data.struct_decl.generic_bounds[i] = NULL;
                     }
                 }
+            } else {
+                new_node->data.struct_decl.generic_params = NULL;
+                new_node->data.struct_decl.generic_bounds = NULL;
+                new_node->data.struct_decl.generic_bounds_counts = NULL;
             }
             new_node->data.struct_decl.where_clause_count = node->data.struct_decl.where_clause_count;
-            if (node->data.struct_decl.where_clauses) {
+            if (node->data.struct_decl.where_clauses && node->data.struct_decl.where_clause_count > 0) {
                 new_node->data.struct_decl.where_clauses = malloc(sizeof(ASTNode*) * node->data.struct_decl.where_clause_count);
                 for (int i = 0; i < node->data.struct_decl.where_clause_count; i++) {
                     new_node->data.struct_decl.where_clauses[i] = ast_clone(node->data.struct_decl.where_clauses[i]);
                 }
+            } else {
+                new_node->data.struct_decl.where_clauses = NULL;
             }
             break;
         case AST_STRUCT_INIT:
@@ -1844,7 +1852,6 @@ ASTNode *parse_impl(Parser *p) {
     // Check for impl Trait for Type
     // or impl Type
     
-    // Skip everything until { or where
     while (p->current.type != TOKEN_LBRACE && p->current.type != TOKEN_WHERE && p->current.type != TOKEN_EOF) {
         if (p->current.type == TOKEN_IDENT) {
             if (struct_name) {
@@ -1852,25 +1859,22 @@ ASTNode *parse_impl(Parser *p) {
                 trait_name = struct_name;
             }
             struct_name = strdup(p->current.text);
+            consume(p, TOKEN_IDENT);
         } else if (p->current.type == TOKEN_LT) {
-            // Skip generic args
+            // Skip generic args properly
             int depth = 0;
             while (p->current.type != TOKEN_EOF) {
                 if (p->current.type == TOKEN_LT) depth++;
                 else if (p->current.type == TOKEN_GT) depth--;
-                
-                // Advance inside the skip loop
-                token_free(p->current);
-                p->current = p->next;
-                p->next = lexer_next_token(p->lexer);
-                
+                consume(p, p->current.type);
                 if (depth == 0) break;
             }
-            continue; // Already advanced
+        } else if (p->current.type == TOKEN_FOR) {
+            consume(p, TOKEN_FOR);
+        } else {
+             // Unexpected token, just consume it to avoid infinite loop
+             consume(p, p->current.type);
         }
-        token_free(p->current);
-        p->current = p->next;
-        p->next = lexer_next_token(p->lexer);
     }
     
     // If we have both, and the last thing before { wasn't 'for', then it's impl Type

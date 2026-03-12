@@ -155,6 +155,12 @@ static void codegen_node(ASTNode *node, FILE *out) {
 
 static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
     if (!node) return;
+
+    // Skip generic definitions in codegen, as they should only be emitted via specializations
+    if (node->type == AST_STRUCT_DECL && node->data.struct_decl.generic_param_count > 0) return;
+    if (node->type == AST_ENUM_DECL && node->data.enum_decl.generic_param_count > 0) return;
+    if (node->type == AST_FUNC && node->data.func.generic_param_count > 0) return;
+
     if (node->type == AST_BLOCK) {
         // Emit drop calls for variables in this block
         // In a real implementation, we'd check if the type implements Drop
@@ -335,7 +341,7 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             if (strncmp(mtype, "struct ", 7) == 0) {
                 fprintf(out, "(%s){", mtype);
             } else {
-                fprintf(out, "(struct %s){", struct_name);
+                fprintf(out, "(struct %s){", mtype);
             }
             for (int i = 0; i < node->data.struct_init.field_count; i++) {
                 codegen_node(node->data.struct_init.fields[i], out);
@@ -696,19 +702,26 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                 }
                 else if (node->data.var_decl.init && node->data.var_decl.init->type == AST_CALL) {
                     char *name = node->data.var_decl.init->data.call.name;
-                    char *underscore = strrchr(name, '_');
-                    if (underscore) {
-                        *underscore = '\0';
-                        fprintf(out, "    struct %s %s", name, node->data.var_decl.name);
-                        *underscore = '_';
-                    } else if (strcmp(name, "Message_Write") == 0) fprintf(out, "    struct Message %s", node->data.var_decl.name);
+                    char *clean_name = strdup(name);
+                    char *p = clean_name;
+                    while (*p) { if (*p == ':' && *(p+1) == ':') { *p = '_'; memmove(p+1, p+2, strlen(p+2)+1); } p++; }
+                    if (strcmp(clean_name, "Box_new") == 0) fprintf(out, "    void* %s", node->data.var_decl.name);
                     else {
-                         if (node->data.var_decl.init->resolved_type) {
-                              fprintf(out, "    %s %s", map_type(type_to_string(node->data.var_decl.init->resolved_type)), node->data.var_decl.name);
-                         } else {
-                              fprintf(out, "    auto %s", node->data.var_decl.name);
-                         }
+                        char *underscore = strrchr(clean_name, '_');
+                        if (underscore) {
+                            *underscore = '\0';
+                            fprintf(out, "    struct %s %s", clean_name, node->data.var_decl.name);
+                            *underscore = '_';
+                        } else if (strcmp(clean_name, "Message_Write") == 0) fprintf(out, "    struct Message %s", node->data.var_decl.name);
+                        else {
+                             if (node->data.var_decl.init->resolved_type) {
+                                  fprintf(out, "    %s %s", map_type(type_to_string(node->data.var_decl.init->resolved_type)), node->data.var_decl.name);
+                             } else {
+                                  fprintf(out, "    auto %s", node->data.var_decl.name);
+                             }
+                        }
                     }
+                    free(clean_name);
                 } else fprintf(out, "    auto %s", node->data.var_decl.name);
                 if (node->data.var_decl.init) { 
                     fprintf(out, " = "); 
@@ -782,9 +795,13 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             break;
         }
         case AST_UNOP:
-            fprintf(out, "(%s", node->data.unop.op);
-            codegen_node_ext(node->data.unop.expr, out, 1);
-            fprintf(out, ")");
+            if (strcmp(node->data.unop.op, "*") == 0 && node->data.unop.expr->type == AST_IDENT) {
+                fprintf(out, "(*(int*)%s)", node->data.unop.expr->data.ident.name); // Heuristic for Box deref
+            } else {
+                fprintf(out, "(%s", node->data.unop.op);
+                codegen_node_ext(node->data.unop.expr, out, 1);
+                fprintf(out, ")");
+            }
             break;
         case AST_STRUCT_DECL:
             fprintf(out, "struct %s {\n", node->data.struct_decl.name);
@@ -863,6 +880,12 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
 
 void codegen_generate(ASTNode *node, FILE *out, Target target, const char *crate_name) {
     if (!node) return;
+    
+    // Skip generic definitions in codegen, as they should only be emitted via specializations
+    if (node->type == AST_STRUCT_DECL && node->data.struct_decl.generic_param_count > 0) return;
+    if (node->type == AST_ENUM_DECL && node->data.enum_decl.generic_param_count > 0) return;
+    if (node->type == AST_FUNC && node->data.func.generic_param_count > 0) return;
+
     current_crate_name_internal = crate_name;
     if (target.backend == BACKEND_ARM64_ASM) { codegen_arm64_generate(node, out, target); return; }
     if (target.backend == BACKEND_ARMV6_ASM) { codegen_armv6_generate(node, out, target); return; }

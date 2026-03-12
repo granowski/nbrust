@@ -244,6 +244,23 @@ static void check_node(ASTNode *node) {
         case AST_RETURN:
             if (node->data.ret_stmt.value) check_node(node->data.ret_stmt.value);
             break;
+        case AST_EXTERN_BLOCK:
+            for (int i = 0; i < node->data.extern_block.count; i++) check_node(node->data.extern_block.items[i]);
+            break;
+        case AST_EXTERN_CRATE:
+        case AST_MACRO_RULES:
+        case AST_TYPE_ALIAS:
+        case AST_CONST:
+        case AST_TRAIT:
+        case AST_GENERIC_TYPE:
+        case AST_USE:
+            break;
+        case AST_TRAIT_IMPL:
+            for (int i = 0; i < node->data.trait_impl.method_count; i++) check_node(node->data.trait_impl.methods[i]);
+            break;
+        case AST_IMPL:
+            for (int i = 0; i < node->data.impl_block.method_count; i++) check_node(node->data.impl_block.methods[i]);
+            break;
         default:
             // Skip other nodes for now
             break;

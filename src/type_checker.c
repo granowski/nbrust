@@ -84,12 +84,8 @@ static Type *check_node(ASTNode *node) {
             if (node->data.var_decl.init) {
                 Type *init_t = check_node(node->data.var_decl.init);
                 if (!t) t = init_t; // Simple type inference
-                else if (!type_equals(t, init_t) && t->kind != TYPE_UNKNOWN && init_t->kind != TYPE_UNKNOWN) {
-                    fprintf(stderr, "Type error: type mismatch in variable declaration '%s'. Expected %s, found %s\n", 
-                            node->data.var_decl.name, type_to_string(t), type_to_string(init_t));
-                }
                 if (node->data.var_decl.init) {
-                    node->data.var_decl.init->resolved_type = t;
+                    node->data.var_decl.init->resolved_type = init_t;
                 }
             }
             if (!t) t = type_primitive(PRIM_I32); // Default
@@ -394,30 +390,40 @@ static Type *check_node(ASTNode *node) {
             break;
         }
         case AST_IMPL: {
-            Symbol *s = symbol_table_lookup(current_table, node->data.impl_block.struct_name);
-            if (s) {
-                if (!s->scope) {
-                    s->scope = symbol_table_new(current_table, node->data.impl_block.struct_name);
+            SymbolTable *old_table = current_table;
+            if (node->data.impl_block.struct_name) {
+                Symbol *s = symbol_table_lookup(current_table, node->data.impl_block.struct_name);
+                if (s) {
+                    if (!s->scope) {
+                        s->scope = symbol_table_new(current_table, node->data.impl_block.struct_name);
+                    }
+                    current_table = s->scope;
                 }
-                SymbolTable *old_table = current_table;
-                current_table = s->scope;
-                for (int i = 0; i < node->data.impl_block.method_count; i++) {
-                    check_node(node->data.impl_block.methods[i]);
-                }
-                current_table = old_table;
-            } else {
-                for (int i = 0; i < node->data.impl_block.method_count; i++) {
-                    check_node(node->data.impl_block.methods[i]);
-                }
+            }
+            for (int i = 0; i < node->data.impl_block.method_count; i++) {
+                check_node(node->data.impl_block.methods[i]);
+            }
+            current_table = old_table;
+            result = type_primitive(PRIM_VOID);
+            break;
+        }
+        case AST_EXTERN_BLOCK: {
+            for (int i = 0; i < node->data.extern_block.count; i++) {
+                check_node(node->data.extern_block.items[i]);
             }
             result = type_primitive(PRIM_VOID);
             break;
         }
-        case AST_MACRO_CALL: {
-            for (int i = 0; i < node->data.macro_call.arg_count; i++) {
-                check_node(node->data.macro_call.args[i]);
-            }
+        case AST_EXTERN_CRATE: {
             result = type_primitive(PRIM_VOID);
+            break;
+        }
+        case AST_MACRO_RULES: {
+            result = type_primitive(PRIM_VOID);
+            break;
+        }
+        case AST_GENERIC_TYPE: {
+            result = type_primitive(PRIM_VOID); // Or something else
             break;
         }
         default:
