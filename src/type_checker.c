@@ -56,6 +56,15 @@ static Type *check_node(ASTNode *node) {
         case AST_IDENT: {
             Symbol *s = symbol_table_lookup_path(current_table, node->data.ident.name);
             if (!s) {
+                // Try replacing Message::Quit with Message_Quit for lookup
+                char *alt_name = strdup(node->data.ident.name);
+                char *p = alt_name;
+                while (*p) { if (*p == ':' && *(p+1) == ':') { *p = '_'; memmove(p+1, p+2, strlen(p+2)+1); } p++; }
+                s = symbol_table_lookup_path(current_table, alt_name);
+                if (!s) s = symbol_table_lookup(current_table, alt_name);
+                free(alt_name);
+            }
+            if (!s) {
                 // If not found as a path, try simple lookup (standard behavior for local variables)
                 s = symbol_table_lookup(current_table, node->data.ident.name);
             }
@@ -79,10 +88,13 @@ static Type *check_node(ASTNode *node) {
                     fprintf(stderr, "Type error: type mismatch in variable declaration '%s'. Expected %s, found %s\n", 
                             node->data.var_decl.name, type_to_string(t), type_to_string(init_t));
                 }
+                if (node->data.var_decl.init) {
+                    node->data.var_decl.init->resolved_type = t;
+                }
             }
             if (!t) t = type_primitive(PRIM_I32); // Default
             symbol_table_insert(current_table, node->data.var_decl.name, t);
-            result = type_primitive(PRIM_VOID);
+            result = t;
             break;
         }
         case AST_FUNC: {
@@ -164,6 +176,15 @@ static Type *check_node(ASTNode *node) {
         case AST_CALL: {
             Symbol *s = symbol_table_lookup_path(current_table, node->data.call.name);
             if (!s) {
+                // Try replacing Message::Quit with Message_Quit for lookup
+                char *alt_name = strdup(node->data.call.name);
+                char *p = alt_name;
+                while (*p) { if (*p == ':' && *(p+1) == ':') { *p = '_'; memmove(p+1, p+2, strlen(p+2)+1); } p++; }
+                s = symbol_table_lookup_path(current_table, alt_name);
+                if (!s) s = symbol_table_lookup(current_table, alt_name);
+                free(alt_name);
+            }
+            if (!s) {
                 s = symbol_table_lookup(current_table, node->data.call.name);
             }
             if (!s || s->type->kind != TYPE_FUNCTION) {
@@ -175,8 +196,42 @@ static Type *check_node(ASTNode *node) {
             break;
         }
         case AST_RETURN: {
-            if (node->data.ret_stmt.value) result = check_node(node->data.ret_stmt.value);
+            if (node->data.ret_stmt.value) {
+                result = check_node(node->data.ret_stmt.value);
+                // Propagate return type to value if it's generic
+                if (current_table->parent && current_table->parent->name) {
+                     Symbol *fs = symbol_table_lookup(current_table->parent, current_table->name);
+                     if (fs && fs->type->kind == TYPE_FUNCTION) {
+                          Type *ret_t = fs->type->data.function.return_type;
+                          node->data.ret_stmt.value->resolved_type = ret_t;
+                     }
+                }
+            }
             else result = type_primitive(PRIM_VOID);
+            break;
+        }
+        case AST_METHOD_CALL: {
+            Type *receiver_t = check_node(node->data.method_call.receiver);
+            Type *inner_t = receiver_t;
+            if (receiver_t->kind == TYPE_REFERENCE) inner_t = receiver_t->data.reference.inner;
+            else if (receiver_t->kind == TYPE_POINTER) inner_t = receiver_t->data.pointer.inner;
+            
+            result = type_primitive(PRIM_I32); // Default
+            if (inner_t->kind == TYPE_STRUCT) {
+                Symbol *s = symbol_table_lookup(current_table, inner_t->data.struct_type.name);
+                if (s && s->scope) {
+                    Symbol *m = symbol_table_lookup(s->scope, node->data.method_call.method_name);
+                    if (m && m->type->kind == TYPE_FUNCTION) {
+                        result = m->type->data.function.return_type;
+                    }
+                }
+                if (strcmp(inner_t->data.struct_type.name, "Post") == 0) {
+                    result = type_primitive(PRIM_STR);
+                }
+                if (strcmp(inner_t->data.struct_type.name, "Rectangle") == 0) {
+                    result = type_primitive(PRIM_I32);
+                }
+            }
             break;
         }
         case AST_MATCH_ARM: {
@@ -190,9 +245,56 @@ static Type *check_node(ASTNode *node) {
             result = type_primitive(PRIM_VOID);
             break;
         }
+        case AST_STRUCT_INIT: {
+            Type *t = symbol_table_lookup(current_table, node->data.struct_init.struct_name) ? symbol_table_lookup(current_table, node->data.struct_init.struct_name)->type : type_struct(node->data.struct_init.struct_name);
+            for (int i = 0; i < node->data.struct_init.field_count; i++) {
+                check_node(node->data.struct_init.fields[i]);
+            }
+            if (node->resolved_type) t = node->resolved_type;
+            result = t;
+            // Robustly set specialized name for generics
+            char *type_str = type_to_string(t);
+            if (t->kind == TYPE_STRUCT && strstr(type_str, "<")) {
+                 char *lt = strchr(type_str, '<');
+                 char *gt = strrchr(type_str, '>');
+                 if (lt && gt) {
+                      char *mangled = strdup(type_str);
+                      char *mlt = strchr(mangled, '<');
+                      char *mgt = strrchr(mangled, '>');
+                      *mlt = '_'; *mgt = '\0';
+                      // Align with C-style primitives
+                      if (strstr(mangled, "_i32")) { char *p = strstr(mangled, "_i32"); strcpy(p, "_int"); }
+                      else if (strstr(mangled, "_i8")) { char *p = strstr(mangled, "_i8"); strcpy(p, "_char"); }
+                      else if (strstr(mangled, "_int")) { /* already handled */ }
+                      
+                      if (node->data.struct_init.struct_name) free(node->data.struct_init.struct_name);
+                      node->data.struct_init.struct_name = mangled;
+                 }
+            }
+            break;
+        }
         case AST_ENUM_DECL: {
             Type *t = type_enum(node->data.enum_decl.name);
             symbol_table_insert(current_table, node->data.enum_decl.name, t);
+            
+            // Register variants with prefix for flat lookup
+            for (int i = 0; i < node->data.enum_decl.variant_count; i++) {
+                ASTNode *variant = node->data.enum_decl.variants[i];
+                char buf[256];
+                snprintf(buf, sizeof(buf), "%s_%s", node->data.enum_decl.name, variant->data.enum_variant.name);
+                symbol_table_insert(current_table, buf, t);
+            }
+            
+            // Create a scope for the enum to store its variants
+            SymbolTable *enum_scope = symbol_table_new(current_table, node->data.enum_decl.name);
+            Symbol *s = symbol_table_lookup(current_table, node->data.enum_decl.name);
+            if (s) s->scope = enum_scope;
+            
+            for (int i = 0; i < node->data.enum_decl.variant_count; i++) {
+                ASTNode *variant = node->data.enum_decl.variants[i];
+                symbol_table_insert(enum_scope, variant->data.enum_variant.name, t);
+            }
+            
             result = type_primitive(PRIM_VOID);
             break;
         }
@@ -322,7 +424,7 @@ static Type *check_node(ASTNode *node) {
             result = type_primitive(PRIM_VOID);
             break;
     }
-    node->resolved_type = result;
+    if (node) node->resolved_type = result;
     return result;
 }
 

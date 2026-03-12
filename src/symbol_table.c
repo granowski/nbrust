@@ -63,38 +63,31 @@ Symbol *symbol_table_lookup_path(SymbolTable *table, const char *path) {
     SymbolTable *current_table = table;
     Symbol *result = NULL;
 
-    char *start = path_copy;
-    if (strncmp(start, "crate::", 7) == 0) {
-        // Go to root
-        while (current_table->parent) current_table = current_table->parent;
-        start += 7;
-    } else if (strncmp(start, "super::", 7) == 0) {
-        if (current_table->parent) current_table = current_table->parent;
-        start += 7;
-    } else if (strncmp(start, "self::", 6) == 0) {
-        start += 6;
-    }
-
-    char *saveptr;
-    char *token = strtok_r(start, "::", &saveptr);
+    char *token = strtok(path_copy, ":");
+    int first = 1;
     while (token != NULL) {
-        Symbol *s = current_table->symbols;
-        result = NULL;
-        while (s) {
-            if (strcmp(s->name, token) == 0) {
-                result = s;
-                break;
+        if (first) {
+            result = symbol_table_lookup(current_table, token);
+            first = 0;
+        } else {
+            Symbol *s = current_table->symbols;
+            result = NULL;
+            while (s) {
+                if (strcmp(s->name, token) == 0) {
+                    result = s;
+                    break;
+                }
+                s = s->next;
             }
-            s = s->next;
         }
-
-        token = strtok_r(NULL, "::", &saveptr);
+        
+        token = strtok(NULL, ":");
         if (token != NULL) {
             if (result && result->scope) {
                 current_table = result->scope;
             } else {
                 free(path_copy);
-                return NULL; // Path component not found or not a scope
+                return NULL;
             }
         }
     }

@@ -139,6 +139,7 @@ int main(int argc, char **argv) {
         if (target.backend == BACKEND_C) {
             fprintf(f, "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n");
             fprintf(f, "typedef int i32;\ntypedef long long i64;\ntypedef unsigned int u32;\ntypedef unsigned long long u64;\ntypedef size_t usize;\n");
+            monomorphization_emit_specializations(f, target);
         }
 
         for (int i = 0; i < all_node_count; i++) {
@@ -153,7 +154,6 @@ int main(int argc, char **argv) {
                 }
             }
         }
-        monomorphization_emit_specializations(f, target);
         fclose(f);
 
         if (!compile_only) {
@@ -182,6 +182,7 @@ int main(int argc, char **argv) {
         if (target.backend == BACKEND_C) {
             printf("#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n");
             printf("typedef int i32;\ntypedef long long i64;\ntypedef unsigned int u32;\ntypedef unsigned long long u64;\ntypedef size_t usize;\n");
+            monomorphization_emit_specializations(stdout, target);
         }
         for (int i = 0; i < all_node_count; i++) {
              ASTNode *ast = all_nodes[i];
@@ -195,7 +196,6 @@ int main(int argc, char **argv) {
                  }
              }
         }
-        monomorphization_emit_specializations(stdout, target);
     }
 
     for (int i = 0; i < all_node_count; i++) ast_free(all_nodes[i]);

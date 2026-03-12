@@ -240,12 +240,71 @@ static void walk_and_specialize(ASTNode *node) {
             break;
         case AST_FUNC:
             walk_and_specialize(node->data.func.body);
+            if (node->data.func.return_type && strchr(node->data.func.return_type, '<')) {
+                char *type_name = strdup(node->data.func.return_type);
+                char *lt = strchr(type_name, '<');
+                char *gt = strrchr(type_name, '>');
+                if (lt && gt) {
+                    *lt = '\0';
+                    *gt = '\0';
+                    char *base = type_name;
+                    char *arg = lt + 1;
+                    char *mangled = mangle_name(base, &arg, 1);
+                    if (!is_specialized(mangled)) {
+                        ASTNode *generic_node = monomorphization_lookup(base);
+                        if (generic_node) {
+                            char *param = generic_node->type == AST_STRUCT_DECL ? generic_node->data.struct_decl.generic_params[0] : NULL;
+                            if (param) {
+                                ASTNode *specialized = specialize_node(generic_node, &param, &arg, 1);
+                                free(specialized->data.struct_decl.name);
+                                specialized->data.struct_decl.name = strdup(mangled);
+                                register_specialization(mangled, specialized);
+                            }
+                        }
+                    }
+                    free(mangled);
+                }
+                free(type_name);
+            }
             break;
         case AST_VAR_DECL:
             walk_and_specialize(node->data.var_decl.init);
-            // Check if type is generic, e.g., Result<i32, String>
+            // Check if type is generic, e.g., Wrapper<i32>
             if (node->data.var_decl.type_name && strchr(node->data.var_decl.type_name, '<')) {
-                // ... handle type specialization ...
+                char *type_name = strdup(node->data.var_decl.type_name);
+                char *lt = strchr(type_name, '<');
+                char *gt = strrchr(type_name, '>');
+                if (lt && gt) {
+                    *lt = '\0';
+                    *gt = '\0';
+                    char *base = type_name;
+                    char *arg = lt + 1;
+                    
+                    char *mangled = mangle_name(base, &arg, 1);
+                    if (!is_specialized(mangled)) {
+                        ASTNode *generic_node = monomorphization_lookup(base);
+                        if (generic_node) {
+                            char *param = NULL;
+                            if (generic_node->type == AST_STRUCT_DECL) param = generic_node->data.struct_decl.generic_params[0];
+                            else if (generic_node->type == AST_FUNC) param = generic_node->data.func.generic_params[0];
+                            else if (generic_node->type == AST_ENUM_DECL) param = generic_node->data.enum_decl.generic_params[0];
+                            
+                            if (param) {
+                                ASTNode *specialized = specialize_node(generic_node, &param, &arg, 1);
+                                if (specialized->type == AST_STRUCT_DECL) {
+                                    free(specialized->data.struct_decl.name);
+                                    specialized->data.struct_decl.name = strdup(mangled);
+                                } else if (specialized->type == AST_FUNC) {
+                                    free(specialized->data.func.name);
+                                    specialized->data.func.name = strdup(mangled);
+                                }
+                                register_specialization(mangled, specialized);
+                            }
+                        }
+                    }
+                    free(mangled);
+                }
+                free(type_name);
             }
             break;
         case AST_CALL: {
