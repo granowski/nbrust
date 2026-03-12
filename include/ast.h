@@ -43,6 +43,7 @@ typedef enum {
 
 typedef struct ASTNode {
     ASTNodeType type;
+    struct Type *resolved_type; // Added for type-aware codegen
     int line;
     int col;
     union {

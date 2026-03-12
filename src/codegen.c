@@ -1,6 +1,7 @@
 #include "codegen.h"
 #include "codegen_arm64.h"
 #include "codegen_armv6.h"
+#include "types.h"
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -413,7 +414,37 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                     char *fmt_val = (node->data.macro_call.args[0]->type == AST_STRING_LITERAL) ? node->data.macro_call.args[0]->data.string_literal.value : node->data.macro_call.args[0]->data.literal.value;
                     char *fmt = strdup(fmt_val);
                     char *p = fmt;
-                    while ((p = strstr(p, "{}"))) { p[0] = '%'; p[1] = 'd'; p += 2; } // Fixed to %d for i32
+                    int arg_idx = 1;
+                    while ((p = strstr(p, "{}"))) {
+                        char spec = 'd'; // Default
+                        if (arg_idx < node->data.macro_call.arg_count) {
+                            ASTNode *arg = node->data.macro_call.args[arg_idx];
+                            struct Type *t = arg->resolved_type;
+                            if (t) {
+                                if (t->kind == TYPE_PRIMITIVE) {
+                                    switch (t->data.primitive) {
+                                        case PRIM_STR: spec = 's'; break;
+                                        case PRIM_I32: spec = 'd'; break;
+                                        case PRIM_I64: spec = 'l'; break; 
+                                        case PRIM_F32:
+                                        case PRIM_F64: spec = 'f'; break;
+                                        case PRIM_BOOL: spec = 'd'; break;
+                                        default: spec = 'd'; break;
+                                    }
+                                } else if (t->kind == TYPE_POINTER || t->kind == TYPE_REFERENCE) {
+                                    spec = 'p';
+                                }
+                            }
+                        }
+                        p[0] = '%';
+                        if (spec == 'l') {
+                             p[1] = 'd'; // Fallback to %d for now, but we'd need %lld
+                        } else {
+                             p[1] = spec;
+                        }
+                        arg_idx++;
+                        p += 2;
+                    }
                     fprintf(out, "\"%s\"", fmt);
                     for (int i = 1; i < node->data.macro_call.arg_count; i++) {
                         fprintf(out, ", ");

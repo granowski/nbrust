@@ -42,13 +42,17 @@ static Type *check_node(ASTNode *node);
 static Type *check_node(ASTNode *node) {
     if (!node) return type_primitive(PRIM_VOID);
     
+    Type *result = type_primitive(PRIM_VOID);
     switch (node->type) {
         case AST_LITERAL:
-            return type_primitive(PRIM_I32);
+            result = type_primitive(PRIM_I32);
+            break;
         case AST_BOOL_LITERAL:
-            return type_primitive(PRIM_BOOL);
+            result = type_primitive(PRIM_BOOL);
+            break;
         case AST_STRING_LITERAL:
-            return type_primitive(PRIM_STR);
+            result = type_primitive(PRIM_STR);
+            break;
         case AST_IDENT: {
             Symbol *s = symbol_table_lookup_path(current_table, node->data.ident.name);
             if (!s) {
@@ -57,17 +61,29 @@ static Type *check_node(ASTNode *node) {
             }
             if (!s) {
                 fprintf(stderr, "Type error: undefined identifier '%s'\n", node->data.ident.name);
-                return type_new(TYPE_UNKNOWN);
+                result = type_new(TYPE_UNKNOWN);
+            } else {
+                result = s->type;
             }
-            return s->type;
+            break;
         }
         case AST_VAR_DECL: {
-            Type *t = parse_type_string(node->data.var_decl.type_name);
-            if (node->data.var_decl.init) {
-                check_node(node->data.var_decl.init);
+            Type *t = NULL;
+            if (node->data.var_decl.type_name) {
+                t = parse_type_string(node->data.var_decl.type_name);
             }
+            if (node->data.var_decl.init) {
+                Type *init_t = check_node(node->data.var_decl.init);
+                if (!t) t = init_t; // Simple type inference
+                else if (!type_equals(t, init_t) && t->kind != TYPE_UNKNOWN && init_t->kind != TYPE_UNKNOWN) {
+                    fprintf(stderr, "Type error: type mismatch in variable declaration '%s'. Expected %s, found %s\n", 
+                            node->data.var_decl.name, type_to_string(t), type_to_string(init_t));
+                }
+            }
+            if (!t) t = type_primitive(PRIM_I32); // Default
             symbol_table_insert(current_table, node->data.var_decl.name, t);
-            return type_primitive(PRIM_VOID);
+            result = type_primitive(PRIM_VOID);
+            break;
         }
         case AST_FUNC: {
             Type *ret_t = parse_type_string(node->data.func.return_type);
@@ -85,7 +101,8 @@ static Type *check_node(ASTNode *node) {
             }
             check_node(node->data.func.body);
             current_table = old_table;
-            return func_t;
+            result = func_t;
+            break;
         }
         case AST_BLOCK: {
             SymbolTable *old_table = current_table;
@@ -95,7 +112,8 @@ static Type *check_node(ASTNode *node) {
                 last_type = check_node(node->data.block.statements[i]);
             }
             current_table = old_table;
-            return last_type;
+            result = last_type;
+            break;
         }
         case AST_IF: {
             check_node(node->data.if_stmt.condition);
@@ -106,21 +124,25 @@ static Type *check_node(ASTNode *node) {
                     fprintf(stderr, "Type error: if/else branches have incompatible types %s and %s\n", 
                             type_to_string(then_t), type_to_string(else_t));
                 }
-                return then_t;
+                result = then_t;
+            } else {
+                result = type_primitive(PRIM_VOID);
             }
-            return type_primitive(PRIM_VOID);
+            break;
         }
         case AST_WHILE: {
             check_node(node->data.while_loop.condition);
             check_node(node->data.while_loop.body);
-            return type_primitive(PRIM_VOID);
+            result = type_primitive(PRIM_VOID);
+            break;
         }
         case AST_FOR_STMT: {
             // For now, assume it's valid if iterable is checked
             check_node(node->data.for_loop.iterable);
             // Ideally add var_name to a new scope
             check_node(node->data.for_loop.body);
-            return type_primitive(PRIM_VOID);
+            result = type_primitive(PRIM_VOID);
+            break;
         }
         case AST_MATCH: {
             // Type *expr_t = check_node(node->data.match_stmt.expr);
@@ -130,12 +152,14 @@ static Type *check_node(ASTNode *node) {
                 ASTNode *arm = node->data.match_stmt.arms[i];
                 arm_t = check_node(arm->data.match_arm.body);
             }
-            return arm_t;
+            result = arm_t;
+            break;
         }
         case AST_BINOP: {
             check_node(node->data.binop.left);
             check_node(node->data.binop.right);
-            return type_primitive(PRIM_VOID);
+            result = type_primitive(PRIM_VOID);
+            break;
         }
         case AST_CALL: {
             Symbol *s = symbol_table_lookup_path(current_table, node->data.call.name);
@@ -144,45 +168,54 @@ static Type *check_node(ASTNode *node) {
             }
             if (!s || s->type->kind != TYPE_FUNCTION) {
                 // Heuristic for built-in or unknown functions
-                return type_primitive(PRIM_I32);
+                result = type_primitive(PRIM_I32);
+            } else {
+                result = s->type->data.function.return_type;
             }
-            return s->type->data.function.return_type;
+            break;
         }
         case AST_RETURN: {
-            if (node->data.ret_stmt.value) return check_node(node->data.ret_stmt.value);
-            return type_primitive(PRIM_VOID);
+            if (node->data.ret_stmt.value) result = check_node(node->data.ret_stmt.value);
+            else result = type_primitive(PRIM_VOID);
+            break;
         }
         case AST_MATCH_ARM: {
             // Pattern should be checked too, but for now just body
-            return check_node(node->data.match_arm.body);
+            result = check_node(node->data.match_arm.body);
+            break;
         }
         case AST_STRUCT_DECL: {
             Type *t = type_struct(node->data.struct_decl.name);
             symbol_table_insert(current_table, node->data.struct_decl.name, t);
-            return type_primitive(PRIM_VOID);
+            result = type_primitive(PRIM_VOID);
+            break;
         }
         case AST_ENUM_DECL: {
             Type *t = type_enum(node->data.enum_decl.name);
             symbol_table_insert(current_table, node->data.enum_decl.name, t);
-            return type_primitive(PRIM_VOID);
+            result = type_primitive(PRIM_VOID);
+            break;
         }
         case AST_TRAIT: {
             Type *t = type_trait(node->data.trait_decl.name);
             symbol_table_insert(current_table, node->data.trait_decl.name, t);
-            return type_primitive(PRIM_VOID);
+            result = type_primitive(PRIM_VOID);
+            break;
         }
         case AST_UNOP: {
             if (strcmp(node->data.unop.op, "&") == 0) {
-                 return type_reference(check_node(node->data.unop.expr), 0);
+                 result = type_reference(check_node(node->data.unop.expr), 0);
             } else if (strcmp(node->data.unop.op, "&mut ") == 0) {
-                 return type_reference(check_node(node->data.unop.expr), 1);
+                 result = type_reference(check_node(node->data.unop.expr), 1);
             } else if (strcmp(node->data.unop.op, "*") == 0) {
                  Type *inner = check_node(node->data.unop.expr);
-                 if (inner->kind == TYPE_POINTER) return inner->data.pointer.inner;
-                 if (inner->kind == TYPE_REFERENCE) return inner->data.reference.inner;
-                 return type_new(TYPE_UNKNOWN);
+                 if (inner->kind == TYPE_POINTER) result = inner->data.pointer.inner;
+                 else if (inner->kind == TYPE_REFERENCE) result = inner->data.reference.inner;
+                 else result = type_new(TYPE_UNKNOWN);
+            } else {
+                result = check_node(node->data.unop.expr);
             }
-            return check_node(node->data.unop.expr);
+            break;
         }
         case AST_MOD: {
             SymbolTable *old_table = current_table;
@@ -194,7 +227,8 @@ static Type *check_node(ASTNode *node) {
                 check_node(node->data.module.body);
                 current_table = old_table;
             }
-            return type_primitive(PRIM_VOID);
+            result = type_primitive(PRIM_VOID);
+            break;
         }
         case AST_USE: {
             // For now, we don't fully resolve 'use' but we could record it in the current scope
@@ -211,12 +245,14 @@ static Type *check_node(ASTNode *node) {
                     }
                 }
             }
-            return type_primitive(PRIM_VOID);
+            result = type_primitive(PRIM_VOID);
+            break;
         }
         case AST_TYPE_ALIAS: {
             Type *t = parse_type_string(node->data.type_alias.type_name);
             symbol_table_insert(current_table, node->data.type_alias.name, t);
-            return type_primitive(PRIM_VOID);
+            result = type_primitive(PRIM_VOID);
+            break;
         }
         case AST_CONST: {
             Type *t = parse_type_string(node->data.const_decl.type_name);
@@ -228,7 +264,8 @@ static Type *check_node(ASTNode *node) {
                 }
             }
             symbol_table_insert(current_table, node->data.const_decl.name, t);
-            return type_primitive(PRIM_VOID);
+            result = type_primitive(PRIM_VOID);
+            break;
         }
         case AST_TRAIT_IMPL: {
             // Find the struct in the symbol table
@@ -251,7 +288,8 @@ static Type *check_node(ASTNode *node) {
                     check_node(node->data.trait_impl.methods[i]);
                 }
             }
-            return type_primitive(PRIM_VOID);
+            result = type_primitive(PRIM_VOID);
+            break;
         }
         case AST_IMPL: {
             Symbol *s = symbol_table_lookup(current_table, node->data.impl_block.struct_name);
@@ -270,11 +308,22 @@ static Type *check_node(ASTNode *node) {
                     check_node(node->data.impl_block.methods[i]);
                 }
             }
-            return type_primitive(PRIM_VOID);
+            result = type_primitive(PRIM_VOID);
+            break;
+        }
+        case AST_MACRO_CALL: {
+            for (int i = 0; i < node->data.macro_call.arg_count; i++) {
+                check_node(node->data.macro_call.args[i]);
+            }
+            result = type_primitive(PRIM_VOID);
+            break;
         }
         default:
-            return type_primitive(PRIM_VOID);
+            result = type_primitive(PRIM_VOID);
+            break;
     }
+    node->resolved_type = result;
+    return result;
 }
 
 void type_checker_run(ASTNode *root) {
