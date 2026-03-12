@@ -9,6 +9,8 @@ static char *safe_strdup(const char *s) {
 ASTNode *ast_clone(ASTNode *node) {
     if (!node) return NULL;
     ASTNode *new_node = ast_new_at(node->type, node->line, node->col);
+    new_node->resolved_type = node->resolved_type;
+    new_node->scope = node->scope;
     switch (node->type) {
         case AST_FUNC:
             new_node->data.func.name = safe_strdup(node->data.func.name);
@@ -22,6 +24,8 @@ ASTNode *ast_clone(ASTNode *node) {
             }
             new_node->data.func.body = ast_clone(node->data.func.body);
             new_node->data.func.generic_param_count = node->data.func.generic_param_count;
+            new_node->data.func.is_generic = node->data.func.is_generic;
+            new_node->data.func.is_specialized = node->data.func.is_specialized;
             if (node->data.func.generic_params) {
                 new_node->data.func.generic_params = malloc(sizeof(char*) * node->data.func.generic_param_count);
                 new_node->data.func.generic_bounds = malloc(sizeof(ASTNode**) * node->data.func.generic_param_count);
@@ -116,6 +120,8 @@ ASTNode *ast_clone(ASTNode *node) {
                 new_node->data.struct_decl.fields = NULL;
             }
             new_node->data.struct_decl.generic_param_count = node->data.struct_decl.generic_param_count;
+            new_node->data.struct_decl.is_generic = node->data.struct_decl.is_generic;
+            new_node->data.struct_decl.is_specialized = node->data.struct_decl.is_specialized;
             if (node->data.struct_decl.generic_params && node->data.struct_decl.generic_param_count > 0) {
                 new_node->data.struct_decl.generic_params = malloc(sizeof(char*) * node->data.struct_decl.generic_param_count);
                 new_node->data.struct_decl.generic_bounds = malloc(sizeof(ASTNode**) * node->data.struct_decl.generic_param_count);
@@ -216,6 +222,8 @@ ASTNode *ast_clone(ASTNode *node) {
                 }
             }
             new_node->data.enum_decl.generic_param_count = node->data.enum_decl.generic_param_count;
+            new_node->data.enum_decl.is_generic = node->data.enum_decl.is_generic;
+            new_node->data.enum_decl.is_specialized = node->data.enum_decl.is_specialized;
             if (node->data.enum_decl.generic_params) {
                 new_node->data.enum_decl.generic_params = malloc(sizeof(char*) * node->data.enum_decl.generic_param_count);
                 new_node->data.enum_decl.generic_bounds = malloc(sizeof(ASTNode**) * node->data.enum_decl.generic_param_count);
@@ -330,6 +338,8 @@ ASTNode *ast_clone(ASTNode *node) {
                 }
             }
             new_node->data.trait_impl.generic_param_count = node->data.trait_impl.generic_param_count;
+            new_node->data.trait_impl.is_generic = node->data.trait_impl.is_generic;
+            new_node->data.trait_impl.is_specialized = node->data.trait_impl.is_specialized;
             if (node->data.trait_impl.generic_params) {
                 new_node->data.trait_impl.generic_params = malloc(sizeof(char*) * node->data.trait_impl.generic_param_count);
                 new_node->data.trait_impl.generic_bounds = malloc(sizeof(ASTNode**) * node->data.trait_impl.generic_param_count);

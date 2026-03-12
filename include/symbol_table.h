@@ -14,6 +14,7 @@ typedef struct SymbolTable {
     Symbol *symbols;
     struct SymbolTable *parent;
     char *name; // Name of the module/namespace
+    int is_block;
 } SymbolTable;
 
 SymbolTable *symbol_table_new(SymbolTable *parent, const char *name);

@@ -44,6 +44,7 @@ typedef enum {
 typedef struct ASTNode {
     ASTNodeType type;
     struct Type *resolved_type; // Added for type-aware codegen
+    struct SymbolTable *scope; // Added to store local scopes for codegen
     int line;
     int col;
     union {

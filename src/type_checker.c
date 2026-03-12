@@ -41,6 +41,7 @@ static Type *check_node(ASTNode *node);
 
 static Type *check_node(ASTNode *node) {
     if (!node) return type_primitive(PRIM_VOID);
+    fprintf(stderr, "DEBUG: check_node type=%d at line %d\n", node->type, node->line);
     
     Type *result = type_primitive(PRIM_VOID);
     switch (node->type) {
@@ -54,6 +55,23 @@ static Type *check_node(ASTNode *node) {
             result = type_primitive(PRIM_STR);
             break;
         case AST_IDENT: {
+            if (strcmp(node->data.ident.name, "self") == 0) {
+                Symbol *s = symbol_table_lookup(current_table, "self");
+                if (s) {
+                    result = s->type;
+                    node->resolved_type = result;
+                    break;
+                }
+            }
+            if (strcmp(node->data.ident.name, "Self") == 0) {
+                SymbolTable *curr = current_table;
+                while (curr && curr->is_block) curr = curr->parent;
+                if (curr && curr->name) {
+                     result = type_struct(curr->name);
+                     node->resolved_type = result;
+                     break;
+                }
+            }
             Symbol *s = symbol_table_lookup_path(current_table, node->data.ident.name);
             if (!s) {
                 // Try replacing Message::Quit with Message_Quit for lookup
@@ -69,12 +87,17 @@ static Type *check_node(ASTNode *node) {
                 s = symbol_table_lookup(current_table, node->data.ident.name);
             }
             if (!s) {
-                fprintf(stderr, "Type error: undefined identifier '%s'\n", node->data.ident.name);
+                // Try global table as last resort
+                SymbolTable *t = current_table;
+                while (t->parent) t = t->parent;
+                s = symbol_table_lookup(t, node->data.ident.name);
+            }
+            if (!s) {
                 result = type_new(TYPE_UNKNOWN);
             } else {
                 result = s->type;
-                node->resolved_type = result;
             }
+            node->resolved_type = result;
             break;
         }
         case AST_VAR_DECL: {
@@ -95,6 +118,11 @@ static Type *check_node(ASTNode *node) {
                 Type *init_t = check_node(node->data.var_decl.init);
                 if (!t) t = init_t; // Simple type inference
                 
+                // If it's a call like Point::new(), use the returned type
+                if (node->data.var_decl.init->type == AST_CALL || node->data.var_decl.init->type == AST_STRUCT_INIT) {
+                    if (init_t) t = init_t;
+                }
+
                 // If t is Result<i32, &str> and init_t is Result_int_Refchar, use the specialized type
                 if (t && init_t && (t->kind == TYPE_ENUM || t->kind == TYPE_STRUCT) && init_t->kind == TYPE_STRUCT) {
                     const char *target_name = (t->kind == TYPE_ENUM) ? t->data.enum_type.name : t->data.struct_type.name;
@@ -102,14 +130,77 @@ static Type *check_node(ASTNode *node) {
                         t = init_t;
                     }
                 }
-
-                if (node->data.var_decl.init) {
-                    node->data.var_decl.init->resolved_type = init_t;
-                }
             }
             if (!t) t = type_primitive(PRIM_I32); // Default
             symbol_table_insert(current_table, node->data.var_decl.name, t);
             result = t;
+            node->resolved_type = t;
+            // Ensure initializer also knows the type if it's a call
+            if (node->data.var_decl.init) {
+                node->data.var_decl.init->resolved_type = t;
+            }
+            break;
+        }
+        case AST_IMPL: {
+            const char *struct_name = node->data.impl_block.struct_name;
+            Symbol *struct_sym = symbol_table_lookup(current_table, struct_name);
+            SymbolTable *impl_scope;
+            
+            if (struct_sym) {
+                if (!struct_sym->scope) {
+                    struct_sym->scope = symbol_table_new(current_table, struct_name);
+                }
+                impl_scope = struct_sym->scope;
+            } else {
+                impl_scope = symbol_table_new(current_table, struct_name);
+                symbol_table_insert(current_table, struct_name, type_struct(struct_name));
+                struct_sym = symbol_table_lookup(current_table, struct_name);
+                if (struct_sym) struct_sym->scope = impl_scope;
+            }
+            
+            SymbolTable *old_table = current_table;
+            current_table = impl_scope;
+            for (int i = 0; i < node->data.impl_block.method_count; i++) {
+                ASTNode *method = node->data.impl_block.methods[i];
+                if (method->type == AST_FUNC) {
+                    // Pre-register method in impl scope
+                    Type *ret_t = parse_type_string(method->data.func.return_type);
+                    Type *func_t = type_function(ret_t, NULL, 0);
+                    symbol_table_insert(impl_scope, method->data.func.name, func_t);
+                    method->resolved_type = func_t;
+                }
+            }
+            for (int i = 0; i < node->data.impl_block.method_count; i++) {
+                ASTNode *method = node->data.impl_block.methods[i];
+                if (method->type == AST_FUNC) {
+                    SymbolTable *method_scope = symbol_table_new(current_table, method->data.func.name);
+                    method_scope->is_block = 1; // It is a block scope for Self lookup
+                    method->scope = method_scope;
+                    SymbolTable *prev_table = current_table;
+                    current_table = method_scope;
+                    
+                    for (int j = 0; j < method->data.func.param_count; j++) {
+                        ASTNode *param = method->data.func.params[j];
+                        if (param->type == AST_PARAM) {
+                            Type *pt = NULL;
+                            if (strcmp(param->data.param.name, "self") == 0) {
+                                pt = type_reference(type_struct(struct_name), 0);
+                            } else if (strcmp(param->data.param.name, "&self") == 0) {
+                                pt = type_reference(type_struct(struct_name), 0);
+                            } else {
+                                pt = parse_type_string(param->data.param.type_name);
+                            }
+                            symbol_table_insert(current_table, param->data.param.name, pt);
+                            param->resolved_type = pt;
+                        }
+                    }
+                    
+                    check_node(method->data.func.body);
+                    current_table = prev_table;
+                }
+            }
+            current_table = old_table;
+            result = type_primitive(PRIM_VOID);
             break;
         }
         case AST_FUNC: {
@@ -117,12 +208,15 @@ static Type *check_node(ASTNode *node) {
             Type **params = malloc(sizeof(Type*) * node->data.func.param_count);
             for (int i = 0; i < node->data.func.param_count; i++) {
                 params[i] = parse_type_string(node->data.func.params[i]->data.param.type_name);
+                node->data.func.params[i]->resolved_type = params[i];
             }
             Type *func_t = type_function(ret_t, params, node->data.func.param_count);
             symbol_table_insert(current_table, node->data.func.name, func_t);
-            
+            node->resolved_type = func_t;
+
             SymbolTable *old_table = current_table;
             current_table = symbol_table_new(old_table, node->data.func.name);
+            node->scope = current_table;
             for (int i = 0; i < node->data.func.param_count; i++) {
                 symbol_table_insert(current_table, node->data.func.params[i]->data.param.name, params[i]);
             }
@@ -134,11 +228,14 @@ static Type *check_node(ASTNode *node) {
         case AST_BLOCK: {
             SymbolTable *old_table = current_table;
             current_table = symbol_table_new(old_table, "block");
+            current_table->is_block = 1; // Mark as block scope
+            node->scope = current_table;
             Type *last_type = type_primitive(PRIM_VOID);
             for (int i = 0; i < node->data.block.count; i++) {
                 last_type = check_node(node->data.block.statements[i]);
             }
-            current_table = old_table;
+            node->resolved_type = last_type;
+            current_table = old_table; 
             result = last_type;
             break;
         }
@@ -172,12 +269,8 @@ static Type *check_node(ASTNode *node) {
             break;
         }
         case AST_MATCH: {
-            // Type *expr_t = check_node(node->data.match_stmt.expr);
+            // check_node(node->data.match_stmt.expr);
             check_node(node->data.match_stmt.expr);
-            struct Type *expr_type = node->data.match_stmt.expr->resolved_type;
-            if (expr_type) {
-                fprintf(stderr, "DEBUG: Match expr type: %s (kind %d)\n", type_to_string(expr_type), expr_type->kind);
-            }
             Type *arm_t = type_primitive(PRIM_VOID);
             for (int i = 0; i < node->data.match_stmt.arm_count; i++) {
                 ASTNode *arm = node->data.match_stmt.arms[i];
@@ -193,27 +286,60 @@ static Type *check_node(ASTNode *node) {
             break;
         }
         case AST_CALL: {
-            Symbol *s = symbol_table_lookup_path(current_table, node->data.call.name);
+            char *name = node->data.call.name;
+            Symbol *s = symbol_table_lookup_path(current_table, name);
             if (!s) {
-                // Try replacing Message::Quit with Message_Quit for lookup
-                char *alt_name = strdup(node->data.call.name);
+                // Try replacing Point::new with Point_new for lookup
+                char *alt_name = strdup(name);
                 char *p = alt_name;
                 while (*p) { if (*p == ':' && *(p+1) == ':') { *p = '_'; memmove(p+1, p+2, strlen(p+2)+1); } p++; }
                 s = symbol_table_lookup_path(current_table, alt_name);
                 if (!s) s = symbol_table_lookup(current_table, alt_name);
+                
+                // Try split Struct_method
+                if (!s && strchr(alt_name, '_')) {
+                     char *copy = strdup(alt_name);
+                     char *underscore = strchr(copy, '_');
+                     *underscore = '\0';
+                     Symbol *ss = symbol_table_lookup(current_table, copy);
+                     if (ss && ss->scope) {
+                          s = symbol_table_lookup(ss->scope, underscore + 1);
+                     }
+                     free(copy);
+                }
                 free(alt_name);
             }
             if (!s) {
                 s = symbol_table_lookup(current_table, node->data.call.name);
             }
-            if (s && s->type->kind == TYPE_ENUM) {
+            if (s && s->type && s->type->kind == TYPE_ENUM) {
                 result = s->type;
-            } else if (!s || s->type->kind != TYPE_FUNCTION) {
+            } else if (!s || !s->type || s->type->kind != TYPE_FUNCTION) {
                 // Heuristic for built-in or unknown functions
                 result = type_primitive(PRIM_I32);
             } else {
                 result = s->type->data.function.return_type;
+                // If it's a static method call Point::new or Point_new, the result should be Point
+                char *name_copy = strdup(node->data.call.name);
+                char *last_sep = strstr(name_copy, "::");
+                if (!last_sep) last_sep = strchr(name_copy, '_');
+                
+                if (last_sep && last_sep > name_copy) {
+                    *last_sep = '\0';
+                    Symbol *ss = symbol_table_lookup(current_table, name_copy);
+                    if (!ss) {
+                         SymbolTable *t = current_table;
+                         while (t->parent) t = t->parent;
+                         ss = symbol_table_lookup(t, name_copy);
+                    }
+                    if (ss && ss->type && (ss->type->kind == TYPE_STRUCT || ss->type->kind == TYPE_ENUM)) {
+                        result = ss->type;
+                    }
+                }
+                free(name_copy);
             }
+            for (int i = 0; i < node->data.call.arg_count; i++) check_node(node->data.call.args[i]);
+            node->resolved_type = result;
             break;
         }
         case AST_RETURN: {
@@ -233,26 +359,32 @@ static Type *check_node(ASTNode *node) {
         }
         case AST_METHOD_CALL: {
             Type *receiver_t = check_node(node->data.method_call.receiver);
+            // Ensure receiver IDENT has the same type
+            if (node->data.method_call.receiver->type == AST_IDENT) {
+                node->data.method_call.receiver->resolved_type = receiver_t;
+                fprintf(stderr, "DEBUG: METHOD_CALL receiver '%s' resolved to kind %d\n", node->data.method_call.receiver->data.ident.name, receiver_t->kind);
+            }
             Type *inner_t = receiver_t;
             if (receiver_t->kind == TYPE_REFERENCE) inner_t = receiver_t->data.reference.inner;
             else if (receiver_t->kind == TYPE_POINTER) inner_t = receiver_t->data.pointer.inner;
             
             result = type_primitive(PRIM_I32); // Default
-            if (inner_t->kind == TYPE_STRUCT) {
+            if (inner_t && inner_t->kind == TYPE_STRUCT) {
                 Symbol *s = symbol_table_lookup(current_table, inner_t->data.struct_type.name);
+                if (!s) {
+                    // Try global table
+                    SymbolTable *t = current_table;
+                    while (t->parent) t = t->parent;
+                    s = symbol_table_lookup(t, inner_t->data.struct_type.name);
+                }
                 if (s && s->scope) {
                     Symbol *m = symbol_table_lookup(s->scope, node->data.method_call.method_name);
                     if (m && m->type->kind == TYPE_FUNCTION) {
                         result = m->type->data.function.return_type;
                     }
                 }
-                if (strcmp(inner_t->data.struct_type.name, "Post") == 0) {
-                    result = type_primitive(PRIM_STR);
-                }
-                if (strcmp(inner_t->data.struct_type.name, "Rectangle") == 0) {
-                    result = type_primitive(PRIM_I32);
-                }
             }
+            node->resolved_type = result;
             break;
         }
         case AST_MATCH_ARM: {
@@ -263,24 +395,36 @@ static Type *check_node(ASTNode *node) {
         case AST_STRUCT_DECL: {
             Type *t = type_struct(node->data.struct_decl.name);
             symbol_table_insert(current_table, node->data.struct_decl.name, t);
+            node->resolved_type = t;
+            
+            // Add a scope for the struct to hold methods
+            SymbolTable *struct_scope = symbol_table_new(current_table, node->data.struct_decl.name);
+            Symbol *s = symbol_table_lookup(current_table, node->data.struct_decl.name);
+            if (s) s->scope = struct_scope;
+
             result = type_primitive(PRIM_VOID);
             break;
         }
         case AST_STRUCT_INIT: {
-            Symbol *s = symbol_table_lookup(current_table, node->data.struct_init.struct_name);
+            const char *sname = node->data.struct_init.struct_name;
+            if (sname && strcmp(sname, "Self") == 0) {
+                 SymbolTable *curr = current_table;
+                 while (curr && curr->is_block) curr = curr->parent;
+                 if (curr && curr->name) sname = curr->name;
+            }
+            Symbol *s = symbol_table_lookup(current_table, sname);
             if (!s) {
                 // Try variant lookup Message::Move -> Message_Move
-                char *alt_name = strdup(node->data.struct_init.struct_name);
+                char *alt_name = strdup(sname);
                 char *p = alt_name;
                 while (*p) { if (*p == ':' && *(p+1) == ':') { *p = '_'; memmove(p+1, p+2, strlen(p+2)+1); } p++; }
                 s = symbol_table_lookup(current_table, alt_name);
                 free(alt_name);
             }
-            Type *t = s ? s->type : type_struct(node->data.struct_init.struct_name);
+            Type *t = s ? s->type : type_struct(sname);
             for (int i = 0; i < node->data.struct_init.field_count; i++) {
                 check_node(node->data.struct_init.fields[i]);
             }
-            if (node->resolved_type) t = node->resolved_type;
             result = t;
             // Robustly set specialized name for generics
             char *type_str = type_to_string(t);
@@ -314,6 +458,7 @@ static Type *check_node(ASTNode *node) {
                 snprintf(buf, sizeof(buf), "%s_%s", node->data.enum_decl.name, variant->data.enum_variant.name);
                 symbol_table_insert(current_table, buf, t);
             }
+            node->resolved_type = t;
             
             // Create a scope for the enum to store its variants
             SymbolTable *enum_scope = symbol_table_new(current_table, node->data.enum_decl.name);
@@ -423,24 +568,6 @@ static Type *check_node(ASTNode *node) {
             result = type_primitive(PRIM_VOID);
             break;
         }
-        case AST_IMPL: {
-            SymbolTable *old_table = current_table;
-            if (node->data.impl_block.struct_name) {
-                Symbol *s = symbol_table_lookup(current_table, node->data.impl_block.struct_name);
-                if (s) {
-                    if (!s->scope) {
-                        s->scope = symbol_table_new(current_table, node->data.impl_block.struct_name);
-                    }
-                    current_table = s->scope;
-                }
-            }
-            for (int i = 0; i < node->data.impl_block.method_count; i++) {
-                check_node(node->data.impl_block.methods[i]);
-            }
-            current_table = old_table;
-            result = type_primitive(PRIM_VOID);
-            break;
-        }
         case AST_EXTERN_BLOCK: {
             for (int i = 0; i < node->data.extern_block.count; i++) {
                 check_node(node->data.extern_block.items[i]);
@@ -471,6 +598,9 @@ static Type *check_node(ASTNode *node) {
 void type_checker_run(ASTNode *root) {
     if (!current_table) {
         current_table = symbol_table_new(NULL, "crate");
+        fprintf(stderr, "DEBUG: Created NEW current_table %p\n", current_table);
+    } else {
+        fprintf(stderr, "DEBUG: Using EXISTING current_table %p\n", current_table);
     }
     check_node(root);
 }

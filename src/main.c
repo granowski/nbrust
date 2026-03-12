@@ -114,12 +114,27 @@ int main(int argc, char **argv) {
     }
     all_node_count = filtered_count;
 
+    // IMPORTANT: Clear current_table before re-running type checker on specialized nodes
+    // type_checker_reset(); // Need to implement this
+    
     fprintf(stderr, "Running type checker...\n");
     fflush(stderr);
+    // Pre-register all top-level types and functions first
     for (int i = 0; i < all_node_count; i++) {
-         fprintf(stderr, "  node %d\n", i);
-         fflush(stderr);
-         type_checker_run(all_nodes[i]);
+        ASTNode *node = all_nodes[i];
+        if (node->type == AST_STRUCT_DECL) {
+             type_checker_run(node); // This will register the struct in global scope
+        } else if (node->type == AST_ENUM_DECL) {
+             type_checker_run(node);
+        }
+    }
+    for (int i = 0; i < all_node_count; i++) {
+         ASTNode *node = all_nodes[i];
+         if (node->type != AST_STRUCT_DECL && node->type != AST_ENUM_DECL) {
+             fprintf(stderr, "  node %d\n", i);
+             fflush(stderr);
+             type_checker_run(node);
+         }
     }
     fprintf(stderr, "Running borrow checker...\n");
     fflush(stderr);

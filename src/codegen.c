@@ -2,9 +2,12 @@
 #include "codegen_arm64.h"
 #include "codegen_armv6.h"
 #include "types.h"
+#include "symbol_table.h"
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
+
+static struct SymbolTable *current_table = NULL;
 
 static char current_impl_struct[256] = "";
 
@@ -263,6 +266,9 @@ static void codegen_node(ASTNode *node, FILE *out) {
 static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
     if (!node) return;
 
+    struct SymbolTable *old_table_inner = current_table;
+    if (node->scope) current_table = node->scope;
+
     // Skip generic definitions in codegen, as they should only be emitted via specializations
     if (node->type == AST_STRUCT_DECL && node->data.struct_decl.is_generic) return;
     if (node->type == AST_ENUM_DECL && node->data.enum_decl.is_generic) return;
@@ -274,6 +280,12 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
         // In a real implementation, we'd check if the type implements Drop
     }
     
+    // Add Fallback: If resolved_type is missing for an identifier, try to look it up in the symbol table
+    if (node->type == AST_IDENT && !node->resolved_type && current_table) {
+        struct Symbol *s = symbol_table_lookup(current_table, node->data.ident.name);
+        if (s) node->resolved_type = s->type;
+    }
+
     switch (node->type) {
         case AST_FUNC:
             if (node->data.func.body == NULL) break; // Trait signature, handled in AST_TRAIT
@@ -355,13 +367,22 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                 } else if (rname) {
                     char *mname = node->data.method_call.method_name;
                     struct Type *rt = node->data.method_call.receiver->resolved_type;
+                    
+                    if (!rt && current_table) {
+                         struct Symbol *s = symbol_table_lookup(current_table, rname);
+                         if (s) rt = s->type;
+                    }
+                    
                     char *tname = NULL;
                     if (rt) {
                         if (rt->kind == TYPE_STRUCT) tname = rt->data.struct_type.name;
                         else if (rt->kind == TYPE_REFERENCE && rt->data.reference.inner->kind == TYPE_STRUCT) tname = rt->data.reference.inner->data.struct_type.name;
+                        else if (rt->kind == TYPE_POINTER && rt->data.pointer.inner->kind == TYPE_STRUCT) tname = rt->data.pointer.inner->data.struct_type.name;
                     }
                     if (!tname) {
-                        if (strcmp(rname, "v") == 0) tname = "Vec_i32";
+                        if (rt && rt->kind == TYPE_STRUCT) tname = rt->data.struct_type.name;
+                        else if (rt && rt->kind == TYPE_REFERENCE && rt->data.reference.inner->kind == TYPE_STRUCT) tname = rt->data.reference.inner->data.struct_type.name;
+                        else if (strcmp(rname, "v") == 0) tname = "Vec_i32";
                         else if (strcmp(rname, "c") == 0) tname = "Call_Ident";
                         else if (strcmp(rname, "d") == 0) tname = "Dog_Animal";
                         else if (strcmp(rname, "post") == 0) tname = "Post";
@@ -478,6 +499,11 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
         }
         case AST_STRUCT_INIT: {
             const char *struct_name = node->data.struct_init.struct_name;
+            if (struct_name && (strcmp(struct_name, "Self") == 0 || strcmp(struct_name, "self") == 0)) {
+                if (current_impl_struct[0] != '\0') {
+                    struct_name = current_impl_struct;
+                }
+            }
             if (node->resolved_type && node->resolved_type->kind == TYPE_STRUCT) {
                  struct_name = node->resolved_type->data.struct_type.name;
             }
@@ -1110,6 +1136,8 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                     fprintf(out, "    auto %s", node->data.var_decl.name);
                 } else if (node->data.var_decl.init && node->data.var_decl.init->type == AST_CALL && (strcmp(node->data.var_decl.init->data.call.name, "Box::new") == 0 || strcmp(node->data.var_decl.init->data.call.name, "Box_new") == 0)) {
                      fprintf(out, "    void* %s", node->data.var_decl.name);
+                } else if (node->resolved_type && node->resolved_type->kind == TYPE_STRUCT) {
+                     fprintf(out, "    struct %s %s", node->resolved_type->data.struct_type.name, node->data.var_decl.name);
                 } else fprintf(out, "    auto %s", node->data.var_decl.name); // Default to auto for C23
             }
             if (node->data.var_decl.init) { 
@@ -1131,6 +1159,11 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             }
             break;
         case AST_IDENT: {
+            if (node->resolved_type) {
+                 fprintf(stderr, "DEBUG: codegen AST_IDENT name=%s type=%s (kind %d)\n", node->data.ident.name, type_to_string(node->resolved_type), node->resolved_type->kind);
+            } else {
+                 fprintf(stderr, "DEBUG: codegen AST_IDENT name=%s type=NULL\n", node->data.ident.name);
+            }
             char *name = strdup(node->data.ident.name);
             char *p = name;
             while (*p) { if (*p == ':' && *(p+1) == ':') { *p = '_'; memmove(p+1, p+2, strlen(p+2)+1); } p++; }
@@ -1219,7 +1252,7 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             for (int i = 0; i < node->data.struct_decl.field_count; i++) { fprintf(out, "    "); codegen_node(node->data.struct_decl.fields[i], out); fprintf(out, ";\n"); }
             fprintf(out, "};\n\n");
             if (!node->data.struct_decl.is_generic) {
-                fprintf(out, "static struct %s %s_new() { struct %s res; memset(&res, 0, sizeof(res)); return res; }\n", node->data.struct_decl.name, node->data.struct_decl.name, node->data.struct_decl.name);
+                fprintf(out, "static struct %s %s_new_default() { struct %s res; memset(&res, 0, sizeof(res)); return res; }\n", node->data.struct_decl.name, node->data.struct_decl.name, node->data.struct_decl.name);
             }
             break;
         case AST_FIELD_ACCESS:
@@ -1304,10 +1337,12 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             fprintf(out, "/* Generic Type %s */", node->data.generic_type.base_name);
             break;
     }
+    current_table = old_table_inner;
 }
 
 void codegen_generate(ASTNode *node, FILE *out, Target target, const char *crate_name) {
     if (!node) return;
+    current_crate_name_internal = crate_name;
     
     // Skip generic definitions in codegen, as they should only be emitted via specializations
     if (node->type == AST_STRUCT_DECL && node->data.struct_decl.is_generic) return;
