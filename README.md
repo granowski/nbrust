@@ -2,6 +2,9 @@
 
 `nbrust` is a minimal implementation of a Rust compiler written in standard C, designed to be compiled and run on NetBSD using its standard toolchain and `bsdmake`. It transpiles a subset of Rust to C23 code, allowing for efficient execution on systems with a C compiler.
 
+> [!NOTE]
+> This project was developed as a technical demonstration. 100% of the code in this repository was generated using the [**Junie CLI**](https://junie.jetbrains.com) powered by the [**Gemini 3 Flash**](https://deepmind.google/technologies/gemini/flash/) model.
+
 #### Architecture
 
 - **Lexer (`src/lexer.c`, `include/lexer.h`)**: Converts Rust source code into a stream of tokens. It handles keywords (`fn`, `let`, `mut`, `enum`, `match`, `trait`, `impl`, `type`), identifiers, integers, and string literals.
