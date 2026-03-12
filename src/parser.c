@@ -788,9 +788,11 @@ static char *parse_type(Parser *p) {
         char *inner = parse_type(p);
         strcat(buf, inner);
         free(inner);
-    } else if (p->current.type == TOKEN_IDENT) {
+    } else if (p->current.type == TOKEN_IDENT || p->current.type == TOKEN_SELF_UPPER) {
         char *type_name = strdup(p->current.text);
-        consume(p, TOKEN_IDENT);
+        if (p->current.type == TOKEN_IDENT) consume(p, TOKEN_IDENT);
+        else consume(p, TOKEN_SELF_UPPER);
+        
         while (p->current.type == TOKEN_COLON_COLON) {
             consume(p, TOKEN_COLON_COLON);
             if (p->current.type == TOKEN_IDENT) {
@@ -838,6 +840,18 @@ static char *parse_type(Parser *p) {
                 free(more);
                 ptype = new_ptype;
             }
+            
+            // Handle Trait bounds in generics like Iterator<Item = T>
+            if (p->current.type == TOKEN_EQUAL) {
+                consume(p, TOKEN_EQUAL);
+                char *bound_type = parse_type(p);
+                char *new_ptype = malloc(strlen(ptype) + 3 + strlen(bound_type) + 1);
+                sprintf(new_ptype, "%s = %s", ptype, bound_type);
+                free(ptype);
+                free(bound_type);
+                ptype = new_ptype;
+            }
+
             consume(p, TOKEN_GT);
             char *full_type = malloc(strlen(type_name) + 2 + strlen(ptype) + 1);
             sprintf(full_type, "%s<%s>", type_name, ptype);
@@ -855,6 +869,21 @@ static char *parse_type(Parser *p) {
     } else if (p->current.type == TOKEN_SELF_UPPER) {
         strcat(buf, "Self");
         consume(p, TOKEN_SELF_UPPER);
+        while (p->current.type == TOKEN_COLON_COLON) {
+            consume(p, TOKEN_COLON_COLON);
+            if (p->current.type == TOKEN_IDENT) {
+                char *next_part = strdup(p->current.text);
+                consume(p, TOKEN_IDENT);
+                strcat(buf, "_");
+                strcat(buf, next_part);
+                free(next_part);
+            } else {
+                break;
+            }
+        }
+    } else if (p->current.type == TOKEN_BANG) {
+        strcat(buf, "void");
+        consume(p, TOKEN_BANG);
     } else if (p->current.type == TOKEN_LBRACKET) {
         consume(p, TOKEN_LBRACKET);
         char *inner = parse_type(p);
@@ -975,6 +1004,15 @@ static ASTNode *parse_pattern(Parser *p) {
 ASTNode *parse_expression(Parser *p);
 
 static ASTNode *parse_primary(Parser *p, int allow_struct_init) {
+    if (p->current.type == TOKEN_BANG) {
+        consume(p, TOKEN_BANG);
+        ASTNode *expr = parse_primary(p, allow_struct_init);
+        ASTNode *node = ast_new(AST_UNOP);
+        node->data.unop.op = strdup("!");
+        node->data.unop.expr = expr;
+        return node;
+    }
+
     if (p->current.type == TOKEN_UNSAFE) {
         consume(p, TOKEN_UNSAFE);
         return parse_primary(p, allow_struct_init); // Skip unsafe in expressions too
@@ -1256,6 +1294,11 @@ static ASTNode *parse_primary(Parser *p, int allow_struct_init) {
         return node;
     } else if (p->current.type == TOKEN_LBRACE) {
         return parse_block(p);
+    } else if (p->current.type == TOKEN_LPAREN) {
+        consume(p, TOKEN_LPAREN);
+        ASTNode *expr = parse_expression(p);
+        consume(p, TOKEN_RPAREN);
+        return expr;
     } else if (p->current.type == TOKEN_IF) {
         consume(p, TOKEN_IF);
         ASTNode *condition = parse_expression(p);
@@ -1524,6 +1567,9 @@ ASTNode *parse_statement(Parser *p) {
         ASTNode *stmt = parse_statement(p);
         // Maybe wrap in a special UNSAFE node if needed, 
         // but for now let's just mark the block or statement if we had a flag.
+        if (stmt && stmt->type == AST_BLOCK && p->current.type == TOKEN_SEMICOLON) {
+            consume(p, TOKEN_SEMICOLON);
+        }
         return stmt;
     }
     
@@ -1618,7 +1664,7 @@ ASTNode *parse_type_alias(Parser *p) {
     if (p->current.type == TOKEN_COLON) {
         // Type bounds on alias? Unlikely but let's be safe
         consume(p, TOKEN_COLON);
-        while (p->current.type != TOKEN_EQUAL && p->current.type != TOKEN_SEMICOLON && p->current.type != TOKEN_EOF) {
+        while (p->current.type != TOKEN_EQUAL && p->current.type != TOKEN_SEMICOLON && p->current.type != TOKEN_LBRACE && p->current.type != TOKEN_EOF) {
             consume(p, p->current.type);
         }
     }
@@ -1632,9 +1678,21 @@ ASTNode *parse_type_alias(Parser *p) {
         node->data.type_alias.name = name;
         node->data.type_alias.type_name = type_name;
         return node;
-    } else {
+    } else if (p->current.type == TOKEN_SEMICOLON) {
         // Associated type in trait: type Item;
         consume(p, TOKEN_SEMICOLON);
+        ASTNode *node = ast_new(AST_TYPE_ALIAS);
+        node->data.type_alias.name = name;
+        node->data.type_alias.type_name = strdup("void*"); // Stub
+        return node;
+    } else {
+        // Just skip unexpected tokens until semicolon
+        while (p->current.type != TOKEN_SEMICOLON && p->current.type != TOKEN_EOF) {
+            lexer_next_token(p->lexer);
+            p->current = p->next;
+            p->next = lexer_next_token(p->lexer);
+        }
+        if (p->current.type == TOKEN_SEMICOLON) consume(p, TOKEN_SEMICOLON);
         ASTNode *node = ast_new(AST_TYPE_ALIAS);
         node->data.type_alias.name = name;
         node->data.type_alias.type_name = strdup("void*"); // Stub
