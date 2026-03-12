@@ -635,7 +635,7 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                             fprintf(out, "{\n");
                             for (int j = 0; j < pattern->data.struct_init.field_count; j++) {
                                 ASTNode *field = pattern->data.struct_init.fields[j];
-                                fprintf(out, "            __auto_type %s = ((struct %s*)_match_tmp)->%s;\n", field->data.field_init.name, ename, field->data.field_init.name);
+                                fprintf(out, "            auto %s = ((struct %s*)_match_tmp)->%s;\n", field->data.field_init.name, ename, field->data.field_init.name);
                             }
                             fprintf(out, "            _match_res = ");
                             codegen_node_ext(arm->data.match_arm.body, out, 1);
@@ -701,7 +701,7 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                                     for (int j = 0; j < pattern->data.call.arg_count; j++) {
                                         ASTNode *arg = pattern->data.call.args[j];
                                         if (arg->type == AST_IDENT) {
-                                            fprintf(out, "            __auto_type %s = ((struct %s*)_match_tmp)->data.%s._%d;\n", arg->data.ident.name, ename, variant_only, j);
+                                            fprintf(out, "            auto %s = ((struct %s*)_match_tmp)->data.%s._%d;\n", arg->data.ident.name, ename, variant_only, j);
                                         }
                                     }
                                 } else if (pattern->type == AST_STRUCT_INIT) {
@@ -710,7 +710,7 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                                         char *fname = (field->type == AST_FIELD_INIT) ? field->data.field_init.name : field->data.ident.name;
                                         ASTNode *val = (field->type == AST_FIELD_INIT) ? field->data.field_init.value : field;
                                         if (val && val->type == AST_IDENT) {
-                                            fprintf(out, "            __auto_type %s = ((struct %s*)_match_tmp)->data.%s.%s;\n", val->data.ident.name, ename, variant_only, fname);
+                                            fprintf(out, "            auto %s = ((struct %s*)_match_tmp)->data.%s.%s;\n", val->data.ident.name, ename, variant_only, fname);
                                         }
                                     }
                                 }
@@ -720,7 +720,7 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                                     for (int j = 0; j < pattern->data.call.arg_count; j++) {
                                         ASTNode *arg = pattern->data.call.args[j];
                                         if (arg->type == AST_IDENT) {
-                                            fprintf(out, "            __auto_type %s = ((struct { int tag; union { struct { long long _0; long long _1; long long _2; long long _3; } %s; } data; }*)_match_tmp)->data.%s._%d;\n", arg->data.ident.name, variant_only, variant_only, j);
+                                            fprintf(out, "            auto %s = ((struct { int tag; union { struct { long long _0; long long _1; long long _2; long long _3; } %s; } data; }*)_match_tmp)->data.%s._%d;\n", arg->data.ident.name, variant_only, variant_only, j);
                                         }
                                     }
                                 } else if (pattern->type == AST_STRUCT_INIT) {
@@ -729,7 +729,7 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                                         char *fname = (field->type == AST_FIELD_INIT) ? field->data.field_init.name : field->data.ident.name;
                                         ASTNode *val = (field->type == AST_FIELD_INIT) ? field->data.field_init.value : field;
                                         if (val && val->type == AST_IDENT) {
-                                            fprintf(out, "            __auto_type %s = ((struct { int tag; union { struct { long long %s; } %s; } data; }*)_match_tmp)->data.%s.%s;\n", val->data.ident.name, fname, variant_only, variant_only, fname);
+                                            fprintf(out, "            auto %s = ((struct { int tag; union { struct { long long %s; } %s; } data; }*)_match_tmp)->data.%s.%s;\n", val->data.ident.name, fname, variant_only, variant_only, fname);
                                         }
                                      }
                                 }
@@ -764,7 +764,7 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                             fprintf(out, "{\n");
                             for (int j = 0; j < pattern->data.struct_init.field_count; j++) {
                                 ASTNode *field = pattern->data.struct_init.fields[j];
-                                fprintf(out, "        __auto_type %s = ((struct %s*)_match_tmp)->%s;\n", field->data.field_init.name, ename, field->data.field_init.name);
+                                fprintf(out, "        auto %s = ((struct %s*)_match_tmp)->%s;\n", field->data.field_init.name, ename, field->data.field_init.name);
                             }
                             codegen_node_ext(arm->data.match_arm.body, out, 0);
                             fprintf(out, "    }\n");
@@ -836,7 +836,7 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                                     for (int j = 0; j < pattern->data.call.arg_count; j++) {
                                         ASTNode *arg = pattern->data.call.args[j];
                                         if (arg->type == AST_IDENT) {
-                                            fprintf(out, "            __auto_type %s = ((struct %s*)_match_tmp)->data.%s._%d;\n", arg->data.ident.name, ename, variant_only, j);
+                                            fprintf(out, "            auto %s = ((struct %s*)_match_tmp)->data.%s._%d;\n", arg->data.ident.name, ename, variant_only, j);
                                         }
                                     }
                                 } else if (pattern->type == AST_STRUCT_INIT) {
@@ -845,7 +845,7 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                                         char *fname = (field->type == AST_FIELD_INIT) ? field->data.field_init.name : field->data.ident.name;
                                         ASTNode *val = (field->type == AST_FIELD_INIT) ? field->data.field_init.value : field;
                                         if (val && val->type == AST_IDENT) {
-                                            fprintf(out, "            __auto_type %s = ((struct %s*)_match_tmp)->data.%s.%s;\n", val->data.ident.name, ename, variant_only, fname);
+                                            fprintf(out, "            auto %s = ((struct %s*)_match_tmp)->data.%s.%s;\n", val->data.ident.name, ename, variant_only, fname);
                                         }
                                     }
                                 }
@@ -855,7 +855,7 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                                     for (int j = 0; j < pattern->data.call.arg_count; j++) {
                                         ASTNode *arg = pattern->data.call.args[j];
                                         if (arg->type == AST_IDENT) {
-                                            fprintf(out, "            __auto_type %s = ((struct { int tag; union { struct { long long _0; long long _1; long long _2; long long _3; } %s; } data; }*)_match_tmp)->data.%s._%d;\n", arg->data.ident.name, variant_only, variant_only, j);
+                                            fprintf(out, "            auto %s = ((struct { int tag; union { struct { long long _0; long long _1; long long _2; long long _3; } %s; } data; }*)_match_tmp)->data.%s._%d;\n", arg->data.ident.name, variant_only, variant_only, j);
                                         }
                                     }
                                 } else if (pattern->type == AST_STRUCT_INIT) {
@@ -864,7 +864,7 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                                         char *fname = (field->type == AST_FIELD_INIT) ? field->data.field_init.name : field->data.ident.name;
                                         ASTNode *val = (field->type == AST_FIELD_INIT) ? field->data.field_init.value : field;
                                         if (val && val->type == AST_IDENT) {
-                                            fprintf(out, "            __auto_type %s = ((struct { int tag; union { struct { long long %s; } %s; } data; }*)_match_tmp)->data.%s.%s;\n", val->data.ident.name, fname, variant_only, variant_only, fname);
+                                            fprintf(out, "            auto %s = ((struct { int tag; union { struct { long long %s; } %s; } data; }*)_match_tmp)->data.%s.%s;\n", val->data.ident.name, fname, variant_only, variant_only, fname);
                                         }
                                      }
                                 }
@@ -1102,16 +1102,15 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                              if (node->data.var_decl.init->resolved_type) {
                                   fprintf(out, "    %s %s", map_type(type_to_string(node->data.var_decl.init->resolved_type)), node->data.var_decl.name);
                              } else {
-                                  fprintf(out, "    __auto_type %s", node->data.var_decl.name);
+                                  fprintf(out, "    auto %s", node->data.var_decl.name);
                              }
                         }
                     }
-                    free(clean_name);
                 } else if (node->data.var_decl.init && node->data.var_decl.init->type == AST_UNOP && strcmp(node->data.var_decl.init->data.unop.op, "&") == 0) {
-                    fprintf(out, "    __auto_type %s", node->data.var_decl.name);
+                    fprintf(out, "    auto %s", node->data.var_decl.name);
                 } else if (node->data.var_decl.init && node->data.var_decl.init->type == AST_CALL && (strcmp(node->data.var_decl.init->data.call.name, "Box::new") == 0 || strcmp(node->data.var_decl.init->data.call.name, "Box_new") == 0)) {
                      fprintf(out, "    void* %s", node->data.var_decl.name);
-                } else fprintf(out, "    __auto_type %s", node->data.var_decl.name); // Default to __auto_type for GCC/Clang
+                } else fprintf(out, "    auto %s", node->data.var_decl.name); // Default to auto for C23
             }
             if (node->data.var_decl.init) { 
                 fprintf(out, " = "); 
@@ -1230,7 +1229,7 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             break;
         case AST_IF:
             if (is_expr) {
-                fprintf(out, "({ __auto_type _res = 0; if (");
+                fprintf(out, "({ auto _res = 0; if (");
                 codegen_node_ext(node->data.if_stmt.condition, out, 1);
                 fprintf(out, ") { _res = ");
                 codegen_node_ext(node->data.if_stmt.then_branch, out, 1);
@@ -1259,13 +1258,13 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             codegen_node(node->data.while_loop.body, out);
             break;
         case AST_FOR_STMT:
-            fprintf(out, "    { __auto_type _iter = ");
+            fprintf(out, "    { auto _iter = ");
             codegen_node_ext(node->data.for_loop.iterable, out, 1);
             fprintf(out, ".into_iter();\n");
             fprintf(out, "      while (1) {\n");
-            fprintf(out, "        __auto_type _next = _iter.next();\n");
+            fprintf(out, "        auto _next = _iter.next();\n");
             fprintf(out, "        if (_next.tag == TAG_Option_None) break;\n");
-            fprintf(out, "        __auto_type %s = _next.data.Some._0;\n", node->data.for_loop.var_name);
+            fprintf(out, "        auto %s = _next.data.Some._0;\n", node->data.for_loop.var_name);
             codegen_node(node->data.for_loop.body, out);
             fprintf(out, "      }\n");
             fprintf(out, "    }\n");
