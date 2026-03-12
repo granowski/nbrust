@@ -30,46 +30,60 @@ ${OBJDIR}:
 .SUFFIXES: .c .o
 
 # Portable rules using $< and $@
-${OBJDIR}/main.o: src/main.c | ${OBJDIR}
+${OBJDIR}/main.o: src/main.c
+	mkdir -p ${OBJDIR}
 	${CC} ${CFLAGS} -c $< -o $@
 
-${OBJDIR}/lexer.o: src/lexer.c | ${OBJDIR}
+${OBJDIR}/lexer.o: src/lexer.c
+	mkdir -p ${OBJDIR}
 	${CC} ${CFLAGS} -c $< -o $@
 
-${OBJDIR}/parser.o: src/parser.c | ${OBJDIR}
+${OBJDIR}/parser.o: src/parser.c
+	mkdir -p ${OBJDIR}
 	${CC} ${CFLAGS} -c $< -o $@
 
-${OBJDIR}/codegen.o: src/codegen.c | ${OBJDIR}
+${OBJDIR}/codegen.o: src/codegen.c
+	mkdir -p ${OBJDIR}
 	${CC} ${CFLAGS} -c $< -o $@
 
-${OBJDIR}/codegen_arm64.o: src/codegen_arm64.c | ${OBJDIR}
+${OBJDIR}/codegen_arm64.o: src/codegen_arm64.c
+	mkdir -p ${OBJDIR}
 	${CC} ${CFLAGS} -c $< -o $@
 
-${OBJDIR}/codegen_armv6.o: src/codegen_armv6.c | ${OBJDIR}
+${OBJDIR}/codegen_armv6.o: src/codegen_armv6.c
+	mkdir -p ${OBJDIR}
 	${CC} ${CFLAGS} -c $< -o $@
 
-${OBJDIR}/types.o: src/types.c | ${OBJDIR}
+${OBJDIR}/types.o: src/types.c
+	mkdir -p ${OBJDIR}
 	${CC} ${CFLAGS} -c $< -o $@
 
-${OBJDIR}/symbol_table.o: src/symbol_table.c | ${OBJDIR}
+${OBJDIR}/symbol_table.o: src/symbol_table.c
+	mkdir -p ${OBJDIR}
 	${CC} ${CFLAGS} -c $< -o $@
 
-${OBJDIR}/type_checker.o: src/type_checker.c | ${OBJDIR}
+${OBJDIR}/type_checker.o: src/type_checker.c
+	mkdir -p ${OBJDIR}
 	${CC} ${CFLAGS} -c $< -o $@
 
-${OBJDIR}/macro_expand.o: src/macro_expand.c | ${OBJDIR}
+${OBJDIR}/macro_expand.o: src/macro_expand.c
+	mkdir -p ${OBJDIR}
 	${CC} ${CFLAGS} -c $< -o $@
 
-${OBJDIR}/borrow_checker.o: src/borrow_checker.c | ${OBJDIR}
+${OBJDIR}/borrow_checker.o: src/borrow_checker.c
+	mkdir -p ${OBJDIR}
 	${CC} ${CFLAGS} -c $< -o $@
 
-${OBJDIR}/monomorphization.o: src/monomorphization.c | ${OBJDIR}
+${OBJDIR}/monomorphization.o: src/monomorphization.c
+	mkdir -p ${OBJDIR}
 	${CC} ${CFLAGS} -c $< -o $@
 
-${OBJDIR}/cargo_main.o: cargo/main.c | ${OBJDIR}
+${OBJDIR}/cargo_main.o: cargo/main.c
+	mkdir -p ${OBJDIR}
 	${CC} ${CFLAGS} -c $< -o $@
 
-${OBJDIR}/toml.o: cargo/toml.c | ${OBJDIR}
+${OBJDIR}/toml.o: cargo/toml.c
+	mkdir -p ${OBJDIR}
 	${CC} ${CFLAGS} -c $< -o $@
 
 ${PROG}: ${OBJS}
