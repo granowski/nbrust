@@ -1,0 +1,38 @@
+# Makefile for NetBSD/BSD bmake
+# This file is meant to be used with 'bmake' or 'make' on NetBSD.
+
+PROGS=		nbrust nbcargo
+
+# nbrust
+SRCS_NBRUST=	src/main.c \
+		src/lexer.c \
+		src/parser.c \
+		src/codegen.c \
+		src/codegen_arm64.c \
+		src/codegen_armv6.c \
+		src/types.c \
+		src/symbol_table.c \
+		src/type_checker.c \
+		src/macro_expand.c \
+		src/borrow_checker.c \
+		src/monomorphization.c
+CPPFLAGS_NBRUST= -Iinclude -Icargo
+
+# nbcargo
+SRCS_NBCARGO=	cargo/main.c \
+		cargo/toml.c
+CPPFLAGS_NBCARGO= -Iinclude -Icargo
+
+# Common flags
+CFLAGS+=	-O2 -Wall
+
+all: nbrust nbcargo
+
+nbrust: ${SRCS_NBRUST}
+	${CC} ${CFLAGS} ${CPPFLAGS_NBRUST} -o nbrust ${SRCS_NBRUST}
+
+nbcargo: ${SRCS_NBCARGO}
+	${CC} ${CFLAGS} ${CPPFLAGS_NBCARGO} -o nbcargo ${SRCS_NBCARGO}
+
+clean:
+	rm -f ${PROGS} *.o src/*.o cargo/*.o

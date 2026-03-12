@@ -19,13 +19,23 @@
 
 #### Building
 
-To build the project on NetBSD:
+To build the project:
 ```bash
 make
 ```
+
+On NetBSD or other systems using `bmake`:
+```bash
+make -f Makefile.bsd
+```
+
 To clean the build artifacts:
 ```bash
 make clean
+```
+or
+```bash
+make -f Makefile.bsd clean
 ```
 
 #### Usage
