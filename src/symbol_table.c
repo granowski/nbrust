@@ -58,10 +58,7 @@ Symbol *symbol_table_lookup(SymbolTable *table, const char *name) {
 }
 
 Symbol *symbol_table_lookup_path(SymbolTable *table, const char *path) {
-    if (strcmp(path, "self") == 0) {
-        // Find current scope? symbol_table_lookup handles it usually, but path might be self::foo
-    }
-    
+    if (path == NULL) return NULL;
     char *path_copy = strdup(path);
     SymbolTable *current_table = table;
     Symbol *result = NULL;
@@ -78,7 +75,8 @@ Symbol *symbol_table_lookup_path(SymbolTable *table, const char *path) {
         start += 6;
     }
 
-    char *token = strtok(start, "::");
+    char *saveptr;
+    char *token = strtok_r(start, "::", &saveptr);
     while (token != NULL) {
         Symbol *s = current_table->symbols;
         result = NULL;
@@ -90,7 +88,7 @@ Symbol *symbol_table_lookup_path(SymbolTable *table, const char *path) {
             s = s->next;
         }
 
-        token = strtok(NULL, "::");
+        token = strtok_r(NULL, "::", &saveptr);
         if (token != NULL) {
             if (result && result->scope) {
                 current_table = result->scope;

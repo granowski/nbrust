@@ -17,7 +17,7 @@ static const char* map_type(const char* rust_type) {
     if (strcmp(rust_type, "u64") == 0 || strcmp(rust_type, "unsigned long long") == 0) return "unsigned long long";
     if (strcmp(rust_type, "usize") == 0 || strcmp(rust_type, "size_t") == 0) return "size_t";
     if (strcmp(rust_type, "isize") == 0 || strcmp(rust_type, "ssize_t") == 0) return "ssize_t";
-    if (strcmp(rust_type, "i8") == 0 || strcmp(rust_type, "signed char") == 0) return "signed char";
+    if (strcmp(rust_type, "i8") == 0 || strcmp(rust_type, "signed char") == 0 || strcmp(rust_type, "char") == 0) return "char";
     if (strcmp(rust_type, "u8") == 0 || strcmp(rust_type, "unsigned char") == 0) return "unsigned char";
     if (strcmp(rust_type, "i16") == 0 || strcmp(rust_type, "short") == 0) return "short";
     if (strcmp(rust_type, "u16") == 0 || strcmp(rust_type, "unsigned short") == 0) return "unsigned short";

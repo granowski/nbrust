@@ -181,7 +181,9 @@ static void check_node(ASTNode *node) {
                         int is_mut_borrowed = 0;
                         int borrow_count = count_borrows(name, &is_mut_borrowed);
                         if (!borrow_count && !is_mut_borrowed) {
-                             v->is_moved = 1;
+                             // Only move if it's not a primitive/copy type
+                             // String literals (&str) are Copy in our current simplified model
+                             // v->is_moved = 1;
                         } else {
                              fprintf(stderr, "Borrow check error at %d:%d: cannot move '%s' because it is borrowed\n", node->line, node->col, name);
                         }

@@ -238,8 +238,6 @@ static void process_file(const char *path, Target target) {
         while (p.current.type == TOKEN_PUB) consume(&p, TOKEN_PUB);
         if (p.current.type == TOKEN_EOF) break;
         ASTNode *ast = NULL;
-        fprintf(stderr, "Parsing next item (current token type %d at line %d)...\n", p.current.type, p.current.line);
-        fflush(stderr);
         if (p.current.type == TOKEN_STRUCT) ast = parse_struct(&p);
         else if (p.current.type == TOKEN_IMPL) ast = parse_impl(&p);
         else if (p.current.type == TOKEN_TRAIT) ast = parse_trait(&p);
@@ -284,24 +282,12 @@ static void process_file(const char *path, Target target) {
                 }
             } else ast = parse_extern_block(&p);
         } else if (p.current.type == TOKEN_SEMICOLON) { consume(&p, TOKEN_SEMICOLON); continue; }
-        else if (p.current.type == TOKEN_IDENT || p.current.type == TOKEN_LET || p.current.type == TOKEN_MATCH || p.current.type == TOKEN_IF || p.current.type == TOKEN_LBRACE) {
-             fprintf(stderr, "Parsing statement starting with %d ('%s')...\n", p.current.type, p.current.text ? p.current.text : "NULL");
-             fflush(stderr);
-             ast = parse_statement(&p);
-             if (ast && ast->type == AST_BLOCK && ast->data.block.count == 0) {
-                 ast_free(ast);
-                 ast = NULL;
-             }
-        }
         else {
-            fprintf(stderr, "Skipping token type %d ('%s') at line %d\n", p.current.type, p.current.text ? p.current.text : "NULL", p.current.line);
-            fflush(stderr);
             p.current = p.next;
             p.next = lexer_next_token(p.lexer);
             continue;
         }
         if (ast) {
-             fprintf(stderr, "Added node of type %d\n", ast->type);
              add_node(ast);
         }
     }

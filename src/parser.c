@@ -740,9 +740,10 @@ void real_consume(Parser *p, TokenType type, int call_line, const char *type_nam
         p->current = p->next;
         p->next = lexer_next_token(p->lexer);
     } else {
-        fprintf(stderr, "Unexpected token %s (type %d), expected %s (%d) at line %d (called from %d)\n", 
-               p->current.text, p->current.type, type_name, type, p->current.line, call_line);
-        // exit(1);
+        fprintf(stderr, "Unexpected token '%s' (type %d), expected %s (%d) at line %d (called from %d)\n", 
+               p->current.text ? p->current.text : "NULL", p->current.type, type_name, type, p->current.line, call_line);
+        fflush(stderr);
+        token_free(p->current);
         p->current = p->next;
         p->next = lexer_next_token(p->lexer);
     }
@@ -760,9 +761,14 @@ static char *parse_type(Parser *p) {
             consume(p, TOKEN_MUT);
         } else if (p->current.type == TOKEN_CONST) {
             consume(p, TOKEN_CONST);
+            strcat(buf, "const ");
         }
         char *inner = parse_type(p);
-        sprintf(buf, "%s*", inner);
+        if (strcmp(inner, "char") == 0) {
+            sprintf(buf, "const char*");
+        } else {
+            sprintf(buf, "%s%s*", buf, inner);
+        }
         free(inner);
     } else if (p->current.type == TOKEN_AMP) {
         strcat(buf, "&");
@@ -805,6 +811,10 @@ static char *parse_type(Parser *p) {
             strcat(buf, "size_t");
         } else if (strcmp(type_name, "isize") == 0) {
             strcat(buf, "ssize_t");
+        } else if (strcmp(type_name, "i8") == 0) {
+            strcat(buf, "char");
+        } else if (strcmp(type_name, "u8") == 0) {
+            strcat(buf, "unsigned char");
         } else if (strcmp(type_name, "str") == 0) {
             strcat(buf, "char");
         } else if (p->current.type == TOKEN_LT) {
@@ -887,9 +897,14 @@ static ASTNode *parse_pattern(Parser *p) {
     
     if (p->current.type == TOKEN_LPAREN) {
         consume(p, TOKEN_LPAREN);
-        ASTNode **args = malloc(sizeof(ASTNode*) * 10);
+        int capacity = 10;
+        ASTNode **args = malloc(sizeof(ASTNode*) * capacity);
         int arg_count = 0;
         while (p->current.type != TOKEN_RPAREN && p->current.type != TOKEN_EOF) {
+            if (arg_count >= capacity) {
+                capacity *= 2;
+                args = realloc(args, sizeof(ASTNode*) * capacity);
+            }
             args[arg_count++] = parse_pattern(p);
             if (p->current.type == TOKEN_COMMA) {
                 consume(p, TOKEN_COMMA);
@@ -903,9 +918,14 @@ static ASTNode *parse_pattern(Parser *p) {
         return node;
     } else if (p->current.type == TOKEN_LBRACE) {
         consume(p, TOKEN_LBRACE);
-        ASTNode **fields = malloc(sizeof(ASTNode*) * 10);
+        int capacity = 10;
+        ASTNode **fields = malloc(sizeof(ASTNode*) * capacity);
         int field_count = 0;
         while (p->current.type != TOKEN_RBRACE && p->current.type != TOKEN_EOF) {
+            if (field_count >= capacity) {
+                capacity *= 2;
+                fields = realloc(fields, sizeof(ASTNode*) * capacity);
+            }
             char *fname = strdup(p->current.text);
             consume(p, TOKEN_IDENT);
             ASTNode *val_pattern = NULL;
@@ -1015,13 +1035,18 @@ static ASTNode *parse_primary(Parser *p, int allow_struct_init) {
         after_ident_label:
         if (p->current.type == TOKEN_BANG) {
             consume(p, TOKEN_BANG);
-            ASTNode **args = malloc(sizeof(ASTNode*) * 10);
+            int capacity = 10;
+            ASTNode **args = malloc(sizeof(ASTNode*) * capacity);
             int arg_count = 0;
             if (p->current.type == TOKEN_LPAREN || p->current.type == TOKEN_LBRACKET || p->current.type == TOKEN_LBRACE) {
                 TokenType open = p->current.type;
                 TokenType close = (open == TOKEN_LPAREN) ? TOKEN_RPAREN : (open == TOKEN_LBRACKET ? TOKEN_RBRACKET : TOKEN_RBRACE);
                 consume(p, open);
                 while (p->current.type != close && p->current.type != TOKEN_EOF) {
+                    if (arg_count >= capacity) {
+                        capacity *= 2;
+                        args = realloc(args, sizeof(ASTNode*) * capacity);
+                    }
                     args[arg_count++] = parse_expression(p);
                     if (p->current.type == TOKEN_COMMA) {
                         consume(p, TOKEN_COMMA);
@@ -1038,9 +1063,14 @@ static ASTNode *parse_primary(Parser *p, int allow_struct_init) {
         
         if (p->current.type == TOKEN_LPAREN) {
             consume(p, TOKEN_LPAREN);
-            ASTNode **args = malloc(sizeof(ASTNode*) * 10);
+            int capacity = 10;
+            ASTNode **args = malloc(sizeof(ASTNode*) * capacity);
             int arg_count = 0;
             while (p->current.type != TOKEN_RPAREN && p->current.type != TOKEN_EOF) {
+                if (arg_count >= capacity) {
+                    capacity *= 2;
+                    args = realloc(args, sizeof(ASTNode*) * capacity);
+                }
                 args[arg_count++] = parse_expression(p);
                 if (p->current.type == TOKEN_COMMA) {
                     consume(p, TOKEN_COMMA);
@@ -1059,9 +1089,14 @@ static ASTNode *parse_primary(Parser *p, int allow_struct_init) {
                 return node;
             }
             consume(p, TOKEN_LBRACE);
-            ASTNode **fields = malloc(sizeof(ASTNode*) * 20);
+            int capacity = 20;
+            ASTNode **fields = malloc(sizeof(ASTNode*) * capacity);
             int field_count = 0;
             while (p->current.type != TOKEN_RBRACE && p->current.type != TOKEN_EOF) {
+                if (field_count >= capacity) {
+                    capacity *= 2;
+                    fields = realloc(fields, sizeof(ASTNode*) * capacity);
+                }
                 char *fname = strdup(p->current.text);
                 consume(p, TOKEN_IDENT);
                 ASTNode *value = NULL;
@@ -1331,8 +1366,23 @@ static ASTNode *parse_primary(Parser *p, int allow_struct_init) {
         return node;
     } else if (p->current.type == TOKEN_LBRACE) {
         return parse_block(p);
+    } else if (p->current.type == TOKEN_INT) {
+        ASTNode *node = ast_new(AST_LITERAL);
+        node->data.literal.value = strdup(p->current.text);
+        consume(p, TOKEN_INT);
+        return node;
+    } else {
+        fprintf(stderr, "Unexpected token in parse_primary: type %d ('%s') at line %d\n", p->current.type, p->current.text ? p->current.text : "NULL", p->current.line);
+        fflush(stderr);
+        // Ensure we consume something to avoid infinite loops
+        Token t = p->current;
+        p->current = p->next;
+        p->next = lexer_next_token(p->lexer);
+        ASTNode *err = ast_new(AST_IDENT);
+        err->data.ident.name = strdup(t.text ? t.text : "error");
+        token_free(t);
+        return err;
     }
-    return NULL;
 }
 
 static int get_precedence(TokenType type) {
@@ -1453,6 +1503,8 @@ static ASTNode *parse_expression_no_struct(Parser *p) {
 static ASTNode *parse_primary(Parser *p, int allow_struct_init);
 
 ASTNode *parse_statement(Parser *p) {
+    while (p->current.type == TOKEN_PUB) consume(p, TOKEN_PUB);
+
     if (p->current.type == TOKEN_UNSAFE) {
         consume(p, TOKEN_UNSAFE);
         ASTNode *stmt = parse_statement(p);
@@ -1461,9 +1513,18 @@ ASTNode *parse_statement(Parser *p) {
         return stmt;
     }
     
-    if (p->current.type == TOKEN_IF || p->current.type == TOKEN_WHILE || p->current.type == TOKEN_MATCH || p->current.type == TOKEN_LBRACE) {
+    if (p->current.type == TOKEN_IF || p->current.type == TOKEN_WHILE || p->current.type == TOKEN_MATCH || p->current.type == TOKEN_LBRACE || p->current.type == TOKEN_FOR) {
         return parse_primary(p, 1);
     }
+
+    if (p->current.type == TOKEN_FN) return parse_function(p);
+    if (p->current.type == TOKEN_STRUCT) return parse_struct(p);
+    if (p->current.type == TOKEN_IMPL) return parse_impl(p);
+    if (p->current.type == TOKEN_TRAIT) return parse_trait(p);
+    if (p->current.type == TOKEN_MOD) return parse_mod(p);
+    if (p->current.type == TOKEN_ENUM) return parse_enum(p);
+    if (p->current.type == TOKEN_USE) return parse_use(p);
+    if (p->current.type == TOKEN_MACRO_RULES) return parse_macro_rules(p);
 
     if (p->current.type == TOKEN_LET) {
         consume(p, TOKEN_LET);
@@ -1567,9 +1628,14 @@ ASTNode *parse_trait(Parser *p) {
     consume(p, TOKEN_IDENT);
     consume(p, TOKEN_LBRACE);
     
-    ASTNode **items = malloc(sizeof(ASTNode*) * 20);
+    int capacity = 20;
+    ASTNode **items = malloc(sizeof(ASTNode*) * capacity);
     int item_count = 0;
     while (p->current.type != TOKEN_RBRACE && p->current.type != TOKEN_EOF) {
+        if (item_count >= capacity) {
+            capacity *= 2;
+            items = realloc(items, sizeof(ASTNode*) * capacity);
+        }
         if (p->current.type == TOKEN_FN) {
             items[item_count++] = parse_function(p);
         } else if (p->current.type == TOKEN_TYPE) {
@@ -1594,7 +1660,7 @@ ASTNode *parse_trait(Parser *p) {
 
 ASTNode *parse_mod(Parser *p) {
     consume(p, TOKEN_MOD);
-    char *name = strdup(p->current.text);
+    char *name = strdup(p->current.text ? p->current.text : "NULL");
     consume(p, TOKEN_IDENT);
     
     ASTNode *body = NULL;
@@ -1612,8 +1678,14 @@ ASTNode *parse_mod(Parser *p) {
 
 ASTNode *parse_use(Parser *p) {
     consume(p, TOKEN_USE);
-    char path[512] = "";
+    int capacity = 512;
+    char *path = malloc(capacity);
+    path[0] = '\0';
     while (p->current.type == TOKEN_IDENT || p->current.type == TOKEN_COLON_COLON || p->current.type == TOKEN_STAR) {
+        if (strlen(path) + strlen(p->current.text) + 1 >= capacity) {
+            capacity *= 2;
+            path = realloc(path, capacity);
+        }
         strcat(path, p->current.text);
         consume(p, p->current.type);
         if (p->current.type == TOKEN_SEMICOLON) break;
@@ -1621,7 +1693,7 @@ ASTNode *parse_use(Parser *p) {
     consume(p, TOKEN_SEMICOLON);
     
     ASTNode *node = ast_new(AST_USE);
-    node->data.use_stmt.path = strdup(path);
+    node->data.use_stmt.path = path;
     return node;
 }
 
@@ -1664,11 +1736,17 @@ ASTNode *parse_macro_rules(Parser *p) {
 }
 
 ASTNode *parse_block(Parser *p) {
+    if (p->current.type != TOKEN_LBRACE) return NULL;
     consume(p, TOKEN_LBRACE);
     ASTNode *node = ast_new(AST_BLOCK);
-    node->data.block.statements = malloc(sizeof(ASTNode*) * 100);
+    int capacity = 100;
+    node->data.block.statements = malloc(sizeof(ASTNode*) * capacity);
     node->data.block.count = 0;
     while (p->current.type != TOKEN_RBRACE && p->current.type != TOKEN_EOF) {
+        if (node->data.block.count >= capacity) {
+            capacity *= 2;
+            node->data.block.statements = realloc(node->data.block.statements, sizeof(ASTNode*) * capacity);
+        }
         node->data.block.statements[node->data.block.count++] = parse_statement(p);
     }
     consume(p, TOKEN_RBRACE);
@@ -1698,9 +1776,14 @@ ASTNode *parse_struct(Parser *p) {
     if (p->current.type == TOKEN_LPAREN) {
         // Tuple struct: struct Foo(i32, i32);
         consume(p, TOKEN_LPAREN);
-        ASTNode **fields = malloc(sizeof(ASTNode*) * 10);
+        int capacity = 10;
+        ASTNode **fields = malloc(sizeof(ASTNode*) * capacity);
         int field_count = 0;
         while (p->current.type != TOKEN_RPAREN && p->current.type != TOKEN_EOF) {
+            if (field_count >= capacity) {
+                capacity *= 2;
+                fields = realloc(fields, sizeof(ASTNode*) * capacity);
+            }
             ASTNode *field = ast_new(AST_PARAM);
             field->data.param.name = malloc(16);
             sprintf(field->data.param.name, "_%d", field_count);
@@ -1717,9 +1800,14 @@ ASTNode *parse_struct(Parser *p) {
 
     consume(p, TOKEN_LBRACE);
     
-    ASTNode **fields = malloc(sizeof(ASTNode*) * 20);
+    int capacity = 20;
+    ASTNode **fields = malloc(sizeof(ASTNode*) * capacity);
     int field_count = 0;
     while (p->current.type != TOKEN_RBRACE && p->current.type != TOKEN_EOF) {
+        if (field_count >= capacity) {
+            capacity *= 2;
+            fields = realloc(fields, sizeof(ASTNode*) * capacity);
+        }
         char *fname = strdup(p->current.text);
         consume(p, TOKEN_IDENT);
         consume(p, TOKEN_COLON);
@@ -1809,9 +1897,14 @@ ASTNode *parse_impl(Parser *p) {
     
     consume(p, TOKEN_LBRACE);
     
-    ASTNode **items = malloc(sizeof(ASTNode*) * 50);
+    int capacity = 50;
+    ASTNode **items = malloc(sizeof(ASTNode*) * capacity);
     int item_count = 0;
     while (p->current.type != TOKEN_RBRACE && p->current.type != TOKEN_EOF) {
+        if (item_count >= capacity) {
+            capacity *= 2;
+            items = realloc(items, sizeof(ASTNode*) * capacity);
+        }
         while (p->current.type == TOKEN_PUB || p->current.type == TOKEN_UNSAFE) {
             consume(p, p->current.type);
         }
@@ -1874,9 +1967,14 @@ ASTNode *parse_enum(Parser *p) {
     
     consume(p, TOKEN_LBRACE);
     
-    ASTNode **variants = malloc(sizeof(ASTNode*) * 50);
+    int capacity = 50;
+    ASTNode **variants = malloc(sizeof(ASTNode*) * capacity);
     int variant_count = 0;
     while (p->current.type != TOKEN_RBRACE && p->current.type != TOKEN_EOF) {
+        if (variant_count >= capacity) {
+            capacity *= 2;
+            variants = realloc(variants, sizeof(ASTNode*) * capacity);
+        }
         char *vname = strdup(p->current.text);
         consume(p, TOKEN_IDENT);
         
