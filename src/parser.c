@@ -855,6 +855,12 @@ static char *parse_type(Parser *p) {
     } else if (p->current.type == TOKEN_SELF_UPPER) {
         strcat(buf, "Self");
         consume(p, TOKEN_SELF_UPPER);
+    } else if (p->current.type == TOKEN_LBRACKET) {
+        consume(p, TOKEN_LBRACKET);
+        char *inner = parse_type(p);
+        consume(p, TOKEN_RBRACKET);
+        sprintf(buf, "%s[]", inner);
+        free(inner);
     }
     return strdup(buf);
 }
@@ -1599,14 +1605,41 @@ ASTNode *parse_type_alias(Parser *p) {
     consume(p, TOKEN_TYPE);
     char *name = strdup(p->current.text);
     consume(p, TOKEN_IDENT);
-    consume(p, TOKEN_EQUAL);
-    char *type_name = parse_type(p);
-    consume(p, TOKEN_SEMICOLON);
     
-    ASTNode *node = ast_new(AST_TYPE_ALIAS);
-    node->data.type_alias.name = name;
-    node->data.type_alias.type_name = type_name;
-    return node;
+    // Support generic parameters for type alias
+    if (p->current.type == TOKEN_LT) {
+        consume(p, TOKEN_LT);
+        while (p->current.type != TOKEN_GT && p->current.type != TOKEN_EOF) {
+            consume(p, p->current.type); // Just skip for now to match other generic parsing
+        }
+        consume(p, TOKEN_GT);
+    }
+
+    if (p->current.type == TOKEN_COLON) {
+        // Type bounds on alias? Unlikely but let's be safe
+        consume(p, TOKEN_COLON);
+        while (p->current.type != TOKEN_EQUAL && p->current.type != TOKEN_SEMICOLON && p->current.type != TOKEN_EOF) {
+            consume(p, p->current.type);
+        }
+    }
+
+    if (p->current.type == TOKEN_EQUAL) {
+        consume(p, TOKEN_EQUAL);
+        char *type_name = parse_type(p);
+        consume(p, TOKEN_SEMICOLON);
+        
+        ASTNode *node = ast_new(AST_TYPE_ALIAS);
+        node->data.type_alias.name = name;
+        node->data.type_alias.type_name = type_name;
+        return node;
+    } else {
+        // Associated type in trait: type Item;
+        consume(p, TOKEN_SEMICOLON);
+        ASTNode *node = ast_new(AST_TYPE_ALIAS);
+        node->data.type_alias.name = name;
+        node->data.type_alias.type_name = strdup("void*"); // Stub
+        return node;
+    }
 }
 
 ASTNode *parse_const(Parser *p) {
