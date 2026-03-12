@@ -1764,7 +1764,19 @@ ASTNode *parse_mod(Parser *p) {
     
     ASTNode *body = NULL;
     if (p->current.type == TOKEN_LBRACE) {
-        body = parse_block(p);
+        consume(p, TOKEN_LBRACE);
+        body = ast_new(AST_BLOCK);
+        int capacity = 100;
+        body->data.block.statements = malloc(sizeof(ASTNode*) * capacity);
+        body->data.block.count = 0;
+        while (p->current.type != TOKEN_RBRACE && p->current.type != TOKEN_EOF) {
+            if (body->data.block.count >= capacity) {
+                capacity *= 2;
+                body->data.block.statements = realloc(body->data.block.statements, sizeof(ASTNode*) * capacity);
+            }
+            body->data.block.statements[body->data.block.count++] = parse_statement(p);
+        }
+        consume(p, TOKEN_RBRACE);
     } else {
         consume(p, TOKEN_SEMICOLON);
     }

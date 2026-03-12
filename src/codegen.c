@@ -438,12 +438,17 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             current_impl_struct[0] = '\0';
             break;
         }
-        case AST_MOD:
+        case AST_MOD: {
             fprintf(out, "/* mod %s */\n", node->data.module.name);
-            if (node->data.module.body) {
+            if (node->data.module.body && node->data.module.body->type == AST_BLOCK) {
+                for (int i = 0; i < node->data.module.body->data.block.count; i++) {
+                    codegen_node(node->data.module.body->data.block.statements[i], out);
+                }
+            } else if (node->data.module.body) {
                 codegen_node(node->data.module.body, out);
             }
             break;
+        }
         case AST_USE:
             fprintf(out, "/* use %s; */\n", node->data.use_stmt.path);
             break;
@@ -743,7 +748,9 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             }
             break;
         case AST_IDENT: {
-            char *name = node->data.ident.name;
+            char *name = strdup(node->data.ident.name);
+            char *p = name;
+            while (*p) { if (*p == ':' && *(p+1) == ':') { *p = '_'; memmove(p+1, p+2, strlen(p+2)+1); } p++; }
             if (node->resolved_type && node->resolved_type->kind == TYPE_ENUM) {
                 // If it's an enum variant constructor (contains :: or matches a variant name)
                 if (strchr(name, ':')) {
