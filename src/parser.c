@@ -1836,8 +1836,11 @@ ASTNode *parse_struct(Parser *p) {
     
     ASTNode *node = ast_new(AST_STRUCT_DECL);
     node->data.struct_decl.name = name;
+    node->data.struct_decl.is_generic = 0;
+    node->data.struct_decl.is_specialized = 0;
 
     parse_generic_params_with_bounds(p, &node->data.struct_decl.generic_params, &node->data.struct_decl.generic_bounds, &node->data.struct_decl.generic_bounds_counts, &node->data.struct_decl.generic_param_count);
+    if (node->data.struct_decl.generic_param_count > 0) node->data.struct_decl.is_generic = 1;
 
     parse_where_clause(p, &node->data.struct_decl.where_clauses, &node->data.struct_decl.where_clause_count);
 
@@ -2007,6 +2010,8 @@ ASTNode *parse_impl(Parser *p) {
         ASTNode *node = ast_new(AST_TRAIT_IMPL);
         node->data.trait_impl.trait_name = trait_name;
         node->data.trait_impl.struct_name = struct_name;
+        node->data.trait_impl.is_generic = (generic_param_count > 0);
+        node->data.trait_impl.is_specialized = 0;
         node->data.trait_impl.methods = items;
         node->data.trait_impl.method_count = item_count;
         node->data.trait_impl.generic_params = generic_params;
@@ -2034,8 +2039,11 @@ ASTNode *parse_enum(Parser *p) {
     
     ASTNode *node = ast_new(AST_ENUM_DECL);
     node->data.enum_decl.name = name;
+    node->data.enum_decl.is_generic = 0;
+    node->data.enum_decl.is_specialized = 0;
 
     parse_generic_params_with_bounds(p, &node->data.enum_decl.generic_params, &node->data.enum_decl.generic_bounds, &node->data.enum_decl.generic_bounds_counts, &node->data.enum_decl.generic_param_count);
+    if (node->data.enum_decl.generic_param_count > 0) node->data.enum_decl.is_generic = 1;
 
     parse_where_clause(p, &node->data.enum_decl.where_clauses, &node->data.enum_decl.where_clause_count);
     
@@ -2158,8 +2166,11 @@ ASTNode *parse_function(Parser *p) {
     
     ASTNode *node = ast_new(AST_FUNC);
     node->data.func.name = name;
-
+    node->data.func.is_generic = 0;
+    node->data.func.is_specialized = 0;
+    
     parse_generic_params_with_bounds(p, &node->data.func.generic_params, &node->data.func.generic_bounds, &node->data.func.generic_bounds_counts, &node->data.func.generic_param_count);
+    if (node->data.func.generic_param_count > 0) node->data.func.is_generic = 1;
 
     consume(p, TOKEN_LPAREN);
     

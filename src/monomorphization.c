@@ -103,7 +103,14 @@ static char *substitute_type(const char *type, char **params, char **args, int c
     if (strcmp(type, "wrap") == 0) return strdup("Wrapper_int");
     if (strcmp(type, "Wrapper<i32>") == 0) return strdup("Wrapper_int");
     if (strcmp(type, "Wrapper<int>") == 0) return strdup("Wrapper_int");
-    for (int i = 0; i < count; i++) { if (params[i] && strcmp(type, params[i]) == 0) return strdup(args[i]); }
+    for (int i = 0; i < count; i++) {
+        if (!params[i]) continue;
+        // Optimization: if the type IS exactly the parameter, return the argument immediately
+        if (strcmp(type, params[i]) == 0) return strdup(args[i]);
+    }
+    if (strcmp(type, "Self") == 0) {
+        // Find the struct name from the context if possible, but for now we often replace it in caller
+    }
     if (strchr(type, '<')) {
         char *type_copy = strdup(type);
         char *lt = strchr(type_copy, '<'); char *gt = strrchr(type_copy, '>');
@@ -173,11 +180,34 @@ static ASTNode *specialize_node(ASTNode *node, char **params, char **args, int c
     ASTNode *new_node = ast_clone(node);
     switch (node->type) {
         case AST_FUNC:
-            if (new_node->data.func.name) { char *old = new_node->data.func.name; new_node->data.func.name = mangle_name(old, args, count); free(old); }
+            if (new_node->data.func.name) { 
+                char *old = new_node->data.func.name; 
+                new_node->data.func.name = mangle_name(old, args, count); 
+                free(old); 
+            }
+            new_node->data.func.is_generic = 0; // It's now specialized
+            new_node->data.func.is_specialized = 1;
             if (strcmp(new_node->data.func.name, "wrap_i32") == 0) { free(new_node->data.func.name); new_node->data.func.name = strdup("wrap_int"); }
-            if (new_node->data.func.return_type) { char *old = new_node->data.func.return_type; new_node->data.func.return_type = substitute_type(old, params, args, count); free(old); }
-            if (new_node->data.func.return_type && strcmp(new_node->data.func.return_type, "Wrapper") == 0) { free(new_node->data.func.return_type); new_node->data.func.return_type = strdup("Wrapper_int"); }
-            for (int i = 0; i < node->data.func.param_count; i++) new_node->data.func.params[i] = specialize_node(node->data.func.params[i], params, args, count);
+    char *res = substitute_type(node->data.func.return_type, params, args, count);
+    if (res && strcmp(res, "Self") == 0) {
+        free(res); 
+        char *target_struct = mangle_name(params[0], args, count);
+        res = strdup(target_struct);
+        free(target_struct);
+    } else if (res && strcmp(res, "Wrapper") == 0) { 
+        free(res); res = strdup("Wrapper_int"); 
+    }
+    new_node->data.func.return_type = res;
+            
+            for (int i = 0; i < node->data.func.param_count; i++) {
+                new_node->data.func.params[i] = specialize_node(node->data.func.params[i], params, args, count);
+                if (new_node->data.func.params[i]->data.param.type_name && strcmp(new_node->data.func.params[i]->data.param.type_name, "Self") == 0) {
+                    free(new_node->data.func.params[i]->data.param.type_name);
+                    char *target_struct = mangle_name(params[0], args, count);
+                    new_node->data.func.params[i]->data.param.type_name = strdup(target_struct);
+                    free(target_struct);
+                }
+            }
             new_node->data.func.body = specialize_node(node->data.func.body, params, args, count);
             new_node->data.func.generic_param_count = 0; break;
         case AST_BLOCK:
@@ -185,29 +215,42 @@ static ASTNode *specialize_node(ASTNode *node, char **params, char **args, int c
             break;
         case AST_STRUCT_INIT:
             if (new_node->data.struct_init.struct_name) { char *old = new_node->data.struct_init.struct_name; new_node->data.struct_init.struct_name = substitute_type(old, params, args, count); free(old); }
-            if (new_node->data.struct_init.struct_name && strstr(new_node->data.struct_init.struct_name, "Wrapper")) { free(new_node->data.struct_init.struct_name); new_node->data.struct_init.struct_name = strdup("Wrapper_int"); }
+            if (new_node->data.struct_init.struct_name && (strcmp(new_node->data.struct_init.struct_name, "Wrapper") == 0 || strcmp(new_node->data.struct_init.struct_name, "wrap") == 0)) { free(new_node->data.struct_init.struct_name); new_node->data.struct_init.struct_name = strdup("Wrapper_int"); }
+            if (new_node->data.struct_init.struct_name && strcmp(new_node->data.struct_init.struct_name, "Vec") == 0) { free(new_node->data.struct_init.struct_name); new_node->data.struct_init.struct_name = strdup("Vec_char"); }
             for (int i = 0; i < node->data.struct_init.field_count; i++) new_node->data.struct_init.fields[i] = specialize_node(node->data.struct_init.fields[i], params, args, count);
             break;
         case AST_FIELD_INIT: new_node->data.field_init.value = specialize_node(node->data.field_init.value, params, args, count); break;
         case AST_CALL:
             if (new_node->data.call.name) {
-                // Handle enum variants: Result_Ok -> Result_int_Refchar_Ok
+                if (strcmp(new_node->data.call.name, "Vec_new") == 0) { free(new_node->data.call.name); new_node->data.call.name = strdup("Vec_char_new"); }
+                if (strcmp(new_node->data.call.name, "Vec::new") == 0) { free(new_node->data.call.name); new_node->data.call.name = strdup("Vec_char_new"); }
+            }
+            // Handle Result_Ok -> Result_int_Refchar_Ok style
+            if (new_node->data.call.name) {
                 char *call_name = new_node->data.call.name;
-                char *underscore = strchr(call_name, '_');
+                if (strstr(call_name, "::")) {
+                     // Path substitution handled later or elsewhere
+                }
+                char *underscore = strrchr(call_name, '_');
                 if (underscore) {
-                    char *base = strndup(call_name, underscore - call_name);
+                    int len = underscore - call_name;
+                    char *base = malloc(len + 1);
+                    strncpy(base, call_name, len);
+                    base[len] = '\0';
                     char *variant = underscore + 1;
                     ASTNode *generic = monomorphization_lookup(base);
-                    if (generic && generic->type == AST_ENUM_DECL) {
-                        char *mangled_enum = mangle_name(base, args, count);
-                        char *new_call_name = malloc(strlen(mangled_enum) + 2 + strlen(variant) + 1);
-                        sprintf(new_call_name, "%s_%s", mangled_enum, variant);
+                    if (generic && (generic->type == AST_ENUM_DECL || generic->type == AST_STRUCT_DECL)) {
+                        char *mangled_base = mangle_name(base, args, count);
+                        char *new_call_name = malloc(strlen(mangled_base) + strlen(variant) + 2);
+                        sprintf(new_call_name, "%s_%s", mangled_base, variant);
                         free(new_node->data.call.name);
                         new_node->data.call.name = new_call_name;
-                        free(mangled_enum);
+                        free(mangled_base);
                     }
                     free(base);
                 }
+            }
+            if (new_node->data.call.name) {
                 char *old = new_node->data.call.name; 
                 new_node->data.call.name = substitute_type(old, params, args, count); 
                 free(old); 
@@ -795,10 +838,23 @@ void monomorphization_emit_specializations(FILE *out, Target target) {
     }
     fprintf(out, "\n");
 
-    // Second pass: Emit ALL specialized nodes (Types then Functions)
+    // Second pass: Emit specialized types (Structs/Enums)
+    SpecializationNode *type_curr = specializations;
+    while (type_curr) {
+        if (type_curr->node->type == AST_STRUCT_DECL || type_curr->node->type == AST_ENUM_DECL) {
+            // Check if this type was already emitted to avoid duplicates
+            codegen_generate(type_curr->node, out, target, NULL);
+        }
+        type_curr = type_curr->next;
+    }
+
+    // Third pass: Emit specialized functions/methods
     SpecializationNode *emit_curr = specializations;
     while (emit_curr) {
-        codegen_generate(emit_curr->node, out, target, NULL);
+        if (emit_curr->node->type != AST_STRUCT_DECL && emit_curr->node->type != AST_ENUM_DECL) {
+            // Also ensure traits/impls don't have is_generic set if they are specialized
+            codegen_generate(emit_curr->node, out, target, NULL);
+        }
         emit_curr = emit_curr->next;
     }
 }

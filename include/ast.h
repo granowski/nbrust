@@ -57,6 +57,8 @@ typedef struct ASTNode {
             struct ASTNode ***generic_bounds; // Array of arrays of trait bounds for each param
             int *generic_bounds_counts;
             int generic_param_count;
+            int is_generic;
+            int is_specialized;
             struct ASTNode **where_clauses;
             int where_clause_count;
         } func;
@@ -113,6 +115,8 @@ typedef struct ASTNode {
             struct ASTNode ***generic_bounds;
             int *generic_bounds_counts;
             int generic_param_count;
+            int is_generic;
+            int is_specialized;
             struct ASTNode **where_clauses;
             int where_clause_count;
         } struct_decl;
@@ -162,6 +166,8 @@ typedef struct ASTNode {
             struct ASTNode ***generic_bounds;
             int *generic_bounds_counts;
             int generic_param_count;
+            int is_generic;
+            int is_specialized;
             struct ASTNode **where_clauses;
             int where_clause_count;
         } enum_decl;
@@ -194,6 +200,8 @@ typedef struct ASTNode {
             struct ASTNode ***generic_bounds;
             int *generic_bounds_counts;
             int generic_param_count;
+            int is_generic;
+            int is_specialized;
             struct ASTNode **where_clauses;
             int where_clause_count;
         } trait_impl;

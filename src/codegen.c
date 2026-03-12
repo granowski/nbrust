@@ -243,9 +243,10 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
     if (!node) return;
 
     // Skip generic definitions in codegen, as they should only be emitted via specializations
-    if (node->type == AST_STRUCT_DECL && node->data.struct_decl.generic_param_count > 0) return;
-    if (node->type == AST_ENUM_DECL && node->data.enum_decl.generic_param_count > 0) return;
-    if (node->type == AST_FUNC && node->data.func.generic_param_count > 0) return;
+    if (node->type == AST_STRUCT_DECL && node->data.struct_decl.is_generic) return;
+    if (node->type == AST_ENUM_DECL && node->data.enum_decl.is_generic) return;
+    if (node->type == AST_FUNC && node->data.func.is_generic) return;
+    if (node->type == AST_TRAIT_IMPL && node->data.trait_impl.is_generic) return;
 
     if (node->type == AST_BLOCK) {
         // Emit drop calls for variables in this block
@@ -395,36 +396,38 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             }
             fprintf(out, "    } data;\n");
             fprintf(out, "};\n\n");
-            fprintf(out, "static struct %s %s_new() { struct %s res; memset(&res, 0, sizeof(res)); return res; }\n", node->data.enum_decl.name, node->data.enum_decl.name, node->data.enum_decl.name);
-            
-            for (int i = 0; i < node->data.enum_decl.variant_count; i++) {
-                ASTNode *variant = node->data.enum_decl.variants[i];
-                char *vname = variant->data.enum_variant.name;
-                fprintf(out, "static struct %s %s_%s(", node->data.enum_decl.name, node->data.enum_decl.name, vname);
-                if (variant->data.enum_variant.variant_type == AST_CALL) {
-                    for (int j = 0; j < variant->data.enum_variant.field_count; j++) {
-                        fprintf(out, "%s _%d", map_type(variant->data.enum_variant.fields[j]->data.param.type_name), j);
-                        if (j < variant->data.enum_variant.field_count - 1) fprintf(out, ", ");
+            if (!node->data.enum_decl.is_generic) {
+                fprintf(out, "static struct %s %s_new() { struct %s res; memset(&res, 0, sizeof(res)); return res; }\n", node->data.enum_decl.name, node->data.enum_decl.name, node->data.enum_decl.name);
+                
+                for (int i = 0; i < node->data.enum_decl.variant_count; i++) {
+                    ASTNode *variant = node->data.enum_decl.variants[i];
+                    char *vname = variant->data.enum_variant.name;
+                    fprintf(out, "static struct %s %s_%s(", node->data.enum_decl.name, node->data.enum_decl.name, vname);
+                    if (variant->data.enum_variant.variant_type == AST_CALL) {
+                        for (int j = 0; j < variant->data.enum_variant.field_count; j++) {
+                            fprintf(out, "%s _%d", map_type(variant->data.enum_variant.fields[j]->data.param.type_name), j);
+                            if (j < variant->data.enum_variant.field_count - 1) fprintf(out, ", ");
+                        }
+                    } else if (variant->data.enum_variant.variant_type == AST_STRUCT_DECL) {
+                        for (int j = 0; j < variant->data.enum_variant.field_count; j++) {
+                            fprintf(out, "%s %s", map_type(variant->data.enum_variant.fields[j]->data.param.type_name), variant->data.enum_variant.fields[j]->data.param.name);
+                            if (j < variant->data.enum_variant.field_count - 1) fprintf(out, ", ");
+                        }
                     }
-                } else if (variant->data.enum_variant.variant_type == AST_STRUCT_DECL) {
-                    for (int j = 0; j < variant->data.enum_variant.field_count; j++) {
-                        fprintf(out, "%s %s", map_type(variant->data.enum_variant.fields[j]->data.param.type_name), variant->data.enum_variant.fields[j]->data.param.name);
-                        if (j < variant->data.enum_variant.field_count - 1) fprintf(out, ", ");
+                    fprintf(out, ") {\n");
+                    fprintf(out, "    struct %s res; res.tag = TAG_%s_%s;\n", node->data.enum_decl.name, node->data.enum_decl.name, vname);
+                    if (variant->data.enum_variant.variant_type == AST_CALL) {
+                        for (int j = 0; j < variant->data.enum_variant.field_count; j++) {
+                            fprintf(out, "    res.data.%s._%d = _%d;\n", vname, j, j);
+                        }
+                    } else if (variant->data.enum_variant.variant_type == AST_STRUCT_DECL) {
+                        for (int j = 0; j < variant->data.enum_variant.field_count; j++) {
+                            char *fname = variant->data.enum_variant.fields[j]->data.param.name;
+                            fprintf(out, "    res.data.%s.%s = %s;\n", vname, fname, fname);
+                        }
                     }
+                    fprintf(out, "    return res;\n}\n");
                 }
-                fprintf(out, ") {\n");
-                fprintf(out, "    struct %s res; res.tag = TAG_%s_%s;\n", node->data.enum_decl.name, node->data.enum_decl.name, vname);
-                if (variant->data.enum_variant.variant_type == AST_CALL) {
-                    for (int j = 0; j < variant->data.enum_variant.field_count; j++) {
-                        fprintf(out, "    res.data.%s._%d = _%d;\n", vname, j, j);
-                    }
-                } else if (variant->data.enum_variant.variant_type == AST_STRUCT_DECL) {
-                    for (int j = 0; j < variant->data.enum_variant.field_count; j++) {
-                        char *fname = variant->data.enum_variant.fields[j]->data.param.name;
-                        fprintf(out, "    res.data.%s.%s = %s;\n", vname, fname, fname);
-                    }
-                }
-                fprintf(out, "    return res;\n}\n");
             }
             break;
         }
@@ -459,7 +462,7 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             }
 
             const char *mtype = map_type(struct_name);
-            if (strncmp(mtype, "struct ", 7) == 0) {
+            if (strncmp(mtype, "struct ", 7) == 0 || strncmp(mtype, "enum ", 5) == 0) {
                 fprintf(out, "(%s){", mtype);
             } else {
                 fprintf(out, "(struct %s){", mtype);
@@ -1150,7 +1153,9 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             fprintf(out, "struct %s {\n", node->data.struct_decl.name);
             for (int i = 0; i < node->data.struct_decl.field_count; i++) { fprintf(out, "    "); codegen_node(node->data.struct_decl.fields[i], out); fprintf(out, ";\n"); }
             fprintf(out, "};\n\n");
-            fprintf(out, "static struct %s %s_new() { struct %s res; memset(&res, 0, sizeof(res)); return res; }\n", node->data.struct_decl.name, node->data.struct_decl.name, node->data.struct_decl.name);
+            if (!node->data.struct_decl.is_generic) {
+                fprintf(out, "static struct %s %s_new() { struct %s res; memset(&res, 0, sizeof(res)); return res; }\n", node->data.struct_decl.name, node->data.struct_decl.name, node->data.struct_decl.name);
+            }
             break;
         case AST_FIELD_ACCESS:
             codegen_node(node->data.field_access.receiver, out);
@@ -1240,9 +1245,10 @@ void codegen_generate(ASTNode *node, FILE *out, Target target, const char *crate
     if (!node) return;
     
     // Skip generic definitions in codegen, as they should only be emitted via specializations
-    if (node->type == AST_STRUCT_DECL && node->data.struct_decl.generic_param_count > 0) return;
-    if (node->type == AST_ENUM_DECL && node->data.enum_decl.generic_param_count > 0) return;
-    if (node->type == AST_FUNC && node->data.func.generic_param_count > 0) return;
+    if (node->type == AST_STRUCT_DECL && node->data.struct_decl.is_generic) return;
+    if (node->type == AST_ENUM_DECL && node->data.enum_decl.is_generic) return;
+    if (node->type == AST_FUNC && node->data.func.is_generic) return;
+    if (node->type == AST_TRAIT_IMPL && node->data.trait_impl.is_generic) return;
 
     current_crate_name_internal = crate_name;
     if (target.backend == BACKEND_ARM64_ASM) { codegen_arm64_generate(node, out, target); return; }

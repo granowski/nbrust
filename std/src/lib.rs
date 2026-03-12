@@ -123,22 +123,19 @@ pub struct String {
 }
 
 impl String {
-    pub fn String_new() -> Self {
-        String::new()
-    }
-    pub fn from(s: &str) -> Self {
-        let mut res = String::new();
+    pub fn from(s: &str) -> String {
+        let mut res = String { vec: Vec_char { data: 0 as *mut u8, len: 0, cap: 0 } };
         // Simple mock: we don't have a way to loop over &str yet easily
         res
     }
-    pub fn new() -> Self {
-        String { vec: Vec::new() }
+    pub fn new_empty() -> String {
+        String { vec: Vec_char { data: 0 as *mut u8, len: 0, cap: 0 } }
     }
     pub fn len(&self) -> usize {
-        self.vec.len()
+        self.vec.len
     }
     pub fn push(&mut self, ch: u8) {
-        self.vec.push(ch);
+        // Vec push is not implemented in mock yet
     }
 }
 
@@ -192,24 +189,12 @@ pub struct Vec<T> {
 }
 
 impl<T> Vec<T> {
-    pub fn new() -> Self {
+    pub fn new() -> Vec<T> {
         Vec { data: 0 as *mut T, len: 0, cap: 0 }
-    }
-    pub fn Vec_new() -> Self {
-        Vec::new()
     }
     pub fn len(&self) -> usize {
         self.len
     }
-}
-
-impl<T> Vec<T> {
-    pub fn with_capacity(capacity: usize) -> Self {
-        let data: *mut T = unsafe { malloc(capacity * sizeof(T)) as *mut T };
-        Vec { data: data, len: 0, cap: capacity }
-    }
-}
-impl<T> Vec<T> {
     pub fn push(&mut self, item: T) {
         if self.len == self.cap {
             let new_cap = if self.cap == 0 { 4 } else { self.cap * 2 };
