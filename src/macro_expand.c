@@ -60,7 +60,7 @@ static ASTNode* apply_macro_expansion(MacroDefinition *m, ASTNode *call) {
         v_decl->data.var_decl.name = strdup("v");
         v_decl->data.var_decl.is_mutable = 1;
         ASTNode *v_init = ast_new(AST_CALL);
-        v_init->data.call.name = strdup("Vec::new");
+        v_init->data.call.name = strdup("Vec_new");
         v_decl->data.var_decl.init = v_init;
         stmts[count++] = v_decl;
         

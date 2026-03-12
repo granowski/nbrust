@@ -79,11 +79,29 @@ static Type *check_node(ASTNode *node) {
         case AST_VAR_DECL: {
             Type *t = NULL;
             if (node->data.var_decl.type_name) {
-                t = parse_type_string(node->data.var_decl.type_name);
+                char *tname = node->data.var_decl.type_name;
+                if (strcmp(tname, "int") == 0) t = type_primitive(PRIM_I32);
+                else if (strcmp(tname, "i32") == 0) t = type_primitive(PRIM_I32);
+                else if (strcmp(tname, "i64") == 0) t = type_primitive(PRIM_I64);
+                else if (strcmp(tname, "u32") == 0) t = type_primitive(PRIM_U32);
+                else if (strcmp(tname, "u64") == 0) t = type_primitive(PRIM_U64);
+                else if (strcmp(tname, "usize") == 0) t = type_primitive(PRIM_USIZE);
+                else if (strcmp(tname, "char") == 0) t = type_primitive(PRIM_I8);
+                else if (strcmp(tname, "bool") == 0) t = type_primitive(PRIM_BOOL);
+                else t = parse_type_string(tname);
             }
             if (node->data.var_decl.init) {
                 Type *init_t = check_node(node->data.var_decl.init);
                 if (!t) t = init_t; // Simple type inference
+                
+                // If t is Result<i32, &str> and init_t is Result_int_Refchar, use the specialized type
+                if (t && init_t && (t->kind == TYPE_ENUM || t->kind == TYPE_STRUCT) && init_t->kind == TYPE_STRUCT) {
+                    const char *target_name = (t->kind == TYPE_ENUM) ? t->data.enum_type.name : t->data.struct_type.name;
+                    if (target_name && strstr(init_t->data.struct_type.name, target_name)) {
+                        t = init_t;
+                    }
+                }
+
                 if (node->data.var_decl.init) {
                     node->data.var_decl.init->resolved_type = init_t;
                 }
@@ -155,6 +173,10 @@ static Type *check_node(ASTNode *node) {
         case AST_MATCH: {
             // Type *expr_t = check_node(node->data.match_stmt.expr);
             check_node(node->data.match_stmt.expr);
+            struct Type *expr_type = node->data.match_stmt.expr->resolved_type;
+            if (expr_type) {
+                fprintf(stderr, "DEBUG: Match expr type: %s (kind %d)\n", type_to_string(expr_type), expr_type->kind);
+            }
             Type *arm_t = type_primitive(PRIM_VOID);
             for (int i = 0; i < node->data.match_stmt.arm_count; i++) {
                 ASTNode *arm = node->data.match_stmt.arms[i];
