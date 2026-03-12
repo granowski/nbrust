@@ -142,6 +142,15 @@ int main(int argc, char **argv) {
         if (target.backend == BACKEND_C) {
             fprintf(f, "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n");
             fprintf(f, "typedef int i32;\ntypedef long long i64;\ntypedef unsigned int u32;\ntypedef unsigned long long u64;\ntypedef size_t usize;\n");
+            
+            // Re-re-re-re-order for full definitions:
+            // 1. All non-generic types (Ident, etc)
+            for (int i = 0; i < all_node_count; i++) {
+                ASTNode *ast = all_nodes[i];
+                if (ast->type == AST_STRUCT_DECL || ast->type == AST_ENUM_DECL) {
+                    codegen_generate(ast, f, target, current_crate_name);
+                }
+            }
         }
 
         // Monomorphization emit needs to happen after we've processed all nodes
@@ -153,7 +162,7 @@ int main(int argc, char **argv) {
             int is_generic = (ast->type == AST_FUNC && ast->data.func.generic_param_count > 0) ||
                              (ast->type == AST_STRUCT_DECL && ast->data.struct_decl.generic_param_count > 0) ||
                              (ast->type == AST_ENUM_DECL && ast->data.enum_decl.generic_param_count > 0);
-            if (!is_generic) {
+            if (!is_generic && ast->type != AST_STRUCT_DECL && ast->type != AST_ENUM_DECL) {
                 codegen_generate(ast, f, target, current_crate_name);
                 if (target.backend == BACKEND_C && (ast->type == AST_BINOP || ast->type == AST_IDENT || ast->type == AST_LITERAL || ast->type == AST_CALL || ast->type == AST_METHOD_CALL || ast->type == AST_MACRO_CALL || ast->type == AST_FIELD_ACCESS || ast->type == AST_UNOP || ast->type == AST_IF || ast->type == AST_MATCH || ast->type == AST_BLOCK)) {
                     fprintf(f, ";\n");
@@ -200,7 +209,7 @@ int main(int argc, char **argv) {
                 }
             }
 
-            // 2. Monomorphization specializations (Vec_int, etc)
+            // 2. Monomorphization specializations (Vec_i32, etc)
             monomorphization_emit_specializations(stdout, target);
         }
         for (int i = 0; i < all_node_count; i++) {

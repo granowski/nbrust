@@ -293,9 +293,9 @@ static Type *check_node(ASTNode *node) {
                       char *mgt = strrchr(mangled, '>');
                       *mlt = '_'; *mgt = '\0';
                       // Align with C-style primitives
-                      if (strstr(mangled, "_i32")) { char *p = strstr(mangled, "_i32"); strcpy(p, "_int"); }
+                      if (strstr(mangled, "_i32")) { /* already i32 */ }
+                      else if (strstr(mangled, "_int")) { char *p = strstr(mangled, "_int"); strcpy(p, "_i32"); }
                       else if (strstr(mangled, "_i8")) { char *p = strstr(mangled, "_i8"); strcpy(p, "_char"); }
-                      else if (strstr(mangled, "_int")) { /* already handled */ }
                       
                       if (node->data.struct_init.struct_name) free(node->data.struct_init.struct_name);
                       node->data.struct_init.struct_name = mangled;

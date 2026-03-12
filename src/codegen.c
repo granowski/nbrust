@@ -326,8 +326,8 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             if (node->data.method_call.receiver) {
                 if (node->data.method_call.receiver->type == AST_IDENT || node->data.method_call.receiver->type == AST_VAR_DECL || node->data.method_call.receiver->type == AST_UNOP) {
                     char *mname = node->data.method_call.method_name;
-                    if (strcmp(mname, "is_empty") == 0 || strcmp(mname, "Vec_int_is_empty") == 0) {
-                         fprintf(out, "Vec_int_is_empty(&");
+                    if (strcmp(mname, "is_empty") == 0 || strcmp(mname, "Vec_i32_is_empty") == 0) {
+                         fprintf(out, "Vec_i32_is_empty(&");
                          codegen_node_ext(node->data.method_call.receiver, out, 0);
                          fprintf(out, ")");
                          break;
@@ -361,7 +361,7 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                         else if (rt->kind == TYPE_REFERENCE && rt->data.reference.inner->kind == TYPE_STRUCT) tname = rt->data.reference.inner->data.struct_type.name;
                     }
                     if (!tname) {
-                        if (strcmp(rname, "v") == 0) tname = "Vec_int";
+                        if (strcmp(rname, "v") == 0) tname = "Vec_i32";
                         else if (strcmp(rname, "c") == 0) tname = "Call_Ident";
                         else if (strcmp(rname, "d") == 0) tname = "Dog_Animal";
                         else if (strcmp(rname, "post") == 0) tname = "Post";
@@ -1093,7 +1093,7 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                     if (strcmp(clean_name, "Box_new") == 0 || strcmp(clean_name, "Box::new") == 0) fprintf(out, "    void* %s", node->data.var_decl.name);
                     else {
                         char *underscore = strrchr(clean_name, '_');
-                        if (underscore) {
+                        if (underscore && isupper(clean_name[0]) && !strstr(clean_name, "_i32") && !strstr(clean_name, "_char") && !strstr(clean_name, "_Ident")) {
                             *underscore = '\0';
                             fprintf(out, "    struct %s %s", clean_name, node->data.var_decl.name);
                             *underscore = '_';
