@@ -165,7 +165,7 @@ int main(int argc, char **argv) {
         if (!compile_only) {
             char cmd[2048];
             if (target.backend == BACKEND_C) {
-                snprintf(cmd, sizeof(cmd), "cc -std=c2x %s -o %s", tmp_source, output_filename);
+                snprintf(cmd, sizeof(cmd), "cc -std=gnu23 %s -o %s", tmp_source, output_filename);
             } else if (target.backend == BACKEND_ARM64_ASM) {
                 if (target.os == OS_MACOS) snprintf(cmd, sizeof(cmd), "as -arch arm64 %s -o /tmp/nbrust_out.o && ld -o %s /tmp/nbrust_out.o -lSystem", tmp_source, output_filename);
                 else snprintf(cmd, sizeof(cmd), "as %s -o /tmp/nbrust_out.o && ld -o %s /tmp/nbrust_out.o", tmp_source, output_filename);
