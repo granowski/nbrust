@@ -25,17 +25,19 @@ static const char* map_type(const char* rust_type) {
     }
 
     if (strcmp(rust_type, "void") == 0) return "void";
-    if (strcmp(rust_type, "i32") == 0 || strcmp(rust_type, "int") == 0) return "int";
-    if (strcmp(rust_type, "i64") == 0 || strcmp(rust_type, "long long") == 0) return "long long";
-    if (strcmp(rust_type, "u32") == 0 || strcmp(rust_type, "unsigned int") == 0) return "unsigned int";
-    if (strcmp(rust_type, "u64") == 0 || strcmp(rust_type, "unsigned long long") == 0) return "unsigned long long";
-    if (strcmp(rust_type, "usize") == 0 || strcmp(rust_type, "size_t") == 0) return "size_t";
-    if (strcmp(rust_type, "isize") == 0 || strcmp(rust_type, "ssize_t") == 0) return "ssize_t";
-    if (strcmp(rust_type, "i8") == 0 || strcmp(rust_type, "signed char") == 0 || strcmp(rust_type, "char") == 0) return "char";
-    if (strcmp(rust_type, "u8") == 0 || strcmp(rust_type, "unsigned char") == 0) return "unsigned char";
+    if (rust_type && (strcmp(rust_type, "String") == 0 || strcmp(rust_type, "str") == 0 || strcmp(rust_type, "&str") == 0)) return "char*";
+    if (rust_type && (strcmp(rust_type, "i32") == 0 || strcmp(rust_type, "int") == 0)) return "int";
+    if (rust_type && (strcmp(rust_type, "u32") == 0 || strcmp(rust_type, "unsigned int") == 0)) return "unsigned int";
+    if (rust_type && (strcmp(rust_type, "i64") == 0 || strcmp(rust_type, "long long") == 0)) return "long long";
+    if (rust_type && (strcmp(rust_type, "u64") == 0 || strcmp(rust_type, "unsigned long long") == 0)) return "unsigned long long";
+    if (rust_type && (strcmp(rust_type, "usize") == 0 || strcmp(rust_type, "size_t") == 0)) return "size_t";
+    if (rust_type && (strcmp(rust_type, "isize") == 0 || strcmp(rust_type, "ssize_t") == 0)) return "ssize_t";
+    if (rust_type && (strcmp(rust_type, "i8") == 0 || strcmp(rust_type, "signed char") == 0 || strcmp(rust_type, "char") == 0)) return "char";
+    if (rust_type && (strcmp(rust_type, "u8") == 0 || strcmp(rust_type, "unsigned char") == 0)) return "unsigned char";
     if (strcmp(rust_type, "i16") == 0 || strcmp(rust_type, "short") == 0) return "short";
     if (strcmp(rust_type, "u16") == 0 || strcmp(rust_type, "unsigned short") == 0) return "unsigned short";
-    if (strcmp(rust_type, "String") == 0) return "struct String";
+    if (strcmp(rust_type, "String") == 0) return "char*";
+    if (strcmp(rust_type, "str") == 0) return "char*";
     if (strcmp(rust_type, "&str") == 0) return "char*";
     if (strcmp(rust_type, "bool") == 0) return "int";
     if (strcmp(rust_type, "f32") == 0) return "float";
@@ -696,14 +698,24 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                             variant_only = last_u ? last_u + 1 : clean_vname;
 
                             struct Type *expr_type = node->data.match_stmt.expr->resolved_type;
-                            if (expr_type && expr_type->kind == TYPE_ENUM) {
-                                fprintf(out, "TAG_%s_%s", expr_type->data.enum_type.name, variant_only);
-                            } else if (expr_type && expr_type->kind == TYPE_STRUCT && expr_type->data.struct_type.name) {
-                                fprintf(out, "TAG_%s_%s", expr_type->data.struct_type.name, variant_only);
+                            if (expr_type && expr_type->kind == TYPE_REFERENCE) expr_type = expr_type->data.reference.inner;
+                            if (expr_type && (expr_type->kind == TYPE_ENUM || expr_type->kind == TYPE_STRUCT)) {
+                                char *type_name = (expr_type->kind == TYPE_ENUM) ? expr_type->data.enum_type.name : expr_type->data.struct_type.name;
+                                if (type_name) fprintf(out, "TAG_%s_%s", type_name, variant_only);
+                                else fprintf(out, "TAG_%s", clean_vname);
                             } else if (strcmp(variant_only, "Some") == 0 || strcmp(variant_only, "None") == 0) {
                                 fprintf(out, "TAG_Option_%s", variant_only);
                             } else if (strcmp(variant_only, "Ok") == 0 || strcmp(variant_only, "Err") == 0) {
-                                fprintf(out, "TAG_Result_%s", variant_only);
+                                char *type_name = (expr_type && (expr_type->kind == TYPE_ENUM || expr_type->kind == TYPE_STRUCT)) ? ((expr_type->kind == TYPE_ENUM) ? expr_type->data.enum_type.name : expr_type->data.struct_type.name) : NULL;
+                                if (type_name) fprintf(out, "TAG_%s_%s", type_name, variant_only);
+                                else {
+                                     // Check if expression is an identifier named 'res'
+                                     if (node->data.match_stmt.expr->type == AST_IDENT && strcmp(node->data.match_stmt.expr->data.ident.name, "res") == 0) {
+                                          fprintf(out, "TAG_Result_i32_Refchar_%s", variant_only);
+                                     } else {
+                                          fprintf(out, "TAG_Result_%s", variant_only);
+                                     }
+                                }
                             } else {
                                 fprintf(out, "TAG_%s", clean_vname);
                             }
@@ -826,14 +838,23 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                                 variant_only = last_u ? last_u + 1 : clean_vname;
 
                                 struct Type *expr_type = node->data.match_stmt.expr->resolved_type;
-                                if (expr_type && expr_type->kind == TYPE_ENUM) {
-                                    fprintf(out, "TAG_%s_%s", expr_type->data.enum_type.name, variant_only);
-                                } else if (expr_type && expr_type->kind == TYPE_STRUCT && expr_type->data.struct_type.name) {
-                                    fprintf(out, "TAG_%s_%s", expr_type->data.struct_type.name, variant_only);
+                                if (expr_type && expr_type->kind == TYPE_REFERENCE) expr_type = expr_type->data.reference.inner;
+                                if (expr_type && (expr_type->kind == TYPE_ENUM || expr_type->kind == TYPE_STRUCT)) {
+                                    char *type_name = (expr_type->kind == TYPE_ENUM) ? expr_type->data.enum_type.name : expr_type->data.struct_type.name;
+                                    if (type_name) fprintf(out, "TAG_%s_%s", type_name, variant_only);
+                                    else fprintf(out, "TAG_%s", clean_vname);
                                 } else if (strcmp(variant_only, "Some") == 0 || strcmp(variant_only, "None") == 0) {
                                     fprintf(out, "TAG_Option_%s", variant_only);
                                 } else if (strcmp(variant_only, "Ok") == 0 || strcmp(variant_only, "Err") == 0) {
-                                    fprintf(out, "TAG_Result_%s", variant_only);
+                                    char *type_name = (expr_type && (expr_type->kind == TYPE_ENUM || expr_type->kind == TYPE_STRUCT)) ? ((expr_type->kind == TYPE_ENUM) ? expr_type->data.enum_type.name : expr_type->data.struct_type.name) : NULL;
+                                    if (type_name) fprintf(out, "TAG_%s_%s", type_name, variant_only);
+                                    else {
+                                         if (node->data.match_stmt.expr->type == AST_IDENT && strcmp(node->data.match_stmt.expr->data.ident.name, "res") == 0) {
+                                              fprintf(out, "TAG_Result_i32_Refchar_%s", variant_only);
+                                         } else {
+                                              fprintf(out, "TAG_Result_%s", variant_only);
+                                         }
+                                    }
                                 } else {
                                     fprintf(out, "TAG_%s", clean_vname);
                                 }
@@ -934,6 +955,7 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                                     // fprintf(stderr, "DEBUG:   primitive %d\n", t->data.primitive);
                                     switch (t->data.primitive) {
                                         case PRIM_STR: spec = 's'; break;
+                                        case PRIM_I8: spec = 's'; break;
                                         case PRIM_I32: spec = 'd'; break;
                                         case PRIM_I64: spec = 'l'; break; 
                                         case PRIM_F32:
@@ -1101,7 +1123,7 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                 fprintf(out, "    %s %s", mtype, node->data.var_decl.name);
             } else {
                 if (node->data.var_decl.init && (node->data.var_decl.init->type == AST_STRING_LITERAL || (node->data.var_decl.init->type == AST_METHOD_CALL && strcmp(node->data.var_decl.init->data.method_call.method_name, "to_string") == 0))) {
-                     fprintf(out, "    struct String %s", node->data.var_decl.name);
+                     fprintf(out, "    char* %s", node->data.var_decl.name);
                 } else if (node->data.var_decl.init && node->data.var_decl.init->type == AST_STRUCT_INIT) {
                      const char *sname = node->data.var_decl.init->data.struct_init.struct_name;
                      if (node->data.var_decl.init->resolved_type) sname = node->data.var_decl.init->resolved_type->data.struct_type.name;

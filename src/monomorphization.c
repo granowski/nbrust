@@ -1091,10 +1091,10 @@ void monomorphization_emit_specializations(FILE *out, Target target) {
     fprintf(out, "struct Box;\n");
     fprintf(out, "struct String;\n");
     fprintf(out, "struct Vec_i32 { int* data; size_t len; size_t cap; };\n");
-    fprintf(out, "static struct Vec_i32 Vec_i32_new() { struct Vec_i32 v; v.data = malloc(sizeof(int)*10); v.len = 0; v.cap = 10; return v; }\n");
-    fprintf(out, "static void Vec_i32_push(struct Vec_i32* v, int val) { v->data[v->len++] = val; }\n");
-    fprintf(out, "static size_t Vec_i32_len(struct Vec_i32* v) { return v->len; }\n");
-    fprintf(out, "static int Vec_i32_is_empty(struct Vec_i32* v) { return v->len == 0; }\n");
+    fprintf(out, "static inline struct Vec_i32 Vec_i32_new() { struct Vec_i32 v; v.data = malloc(sizeof(int)*10); v.len = 0; v.cap = 10; return v; }\n");
+    fprintf(out, "static inline void Vec_i32_push(struct Vec_i32* v, int val) { v->data[v->len++] = val; }\n");
+    fprintf(out, "static inline size_t Vec_i32_len(struct Vec_i32* v) { return v->len; }\n");
+    fprintf(out, "static inline int Vec_i32_is_empty(struct Vec_i32* v) { return v->len == 0; }\n");
     fprintf(out, "#endif\n\n");
 
     // Zero pass: Forward declare all specialized types to avoid incomplete type errors
@@ -1108,10 +1108,9 @@ void monomorphization_emit_specializations(FILE *out, Target target) {
     // Also forward declare non-generic structs
     // This is needed because specializations might refer to them and they might be defined later.
     // We should ideally iterate over all_nodes but we don't have it here.
-    fprintf(out, "struct Ident;\nstruct Node_vtable;\nstruct Node_object;\n");
-    
-    // DEFINITIONS PASS FOR COMMON STD TYPES
-    // No hardcoded definitions here.
+    fprintf(out, "struct Ident;\ntypedef struct Ident Ident;\n");
+    fprintf(out, "struct Node_vtable;\nstruct Node_object;\n");
+    fprintf(out, "struct Self_Item;\nstruct Self_Self;\n"); // HACK for incomplete types
     fprintf(out, "\n");
 
     // First pass: Emit tag definitions for enums
