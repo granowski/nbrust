@@ -31,5 +31,7 @@ typedef struct {
 } Target;
 
 void codegen_generate(ASTNode *node, FILE *out, Target target, const char *crate_name);
+void codegen_emit_enum_tags(ASTNode *node, FILE *out);
+void codegen_emit_type_body(ASTNode *node, FILE *out);
 
 #endif

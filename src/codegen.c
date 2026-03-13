@@ -25,17 +25,19 @@ static const char* map_type(const char* rust_type) {
     }
 
     if (strcmp(rust_type, "void") == 0) return "void";
+    if (rust_type && strcmp(rust_type, "mut") == 0) return "";
+    if (rust_type && (strcmp(rust_type, "T") == 0 || strcmp(rust_type, "V") == 0 || strcmp(rust_type, "K") == 0 || strcmp(rust_type, "Self_Item") == 0)) return "i32";
     if (rust_type && (strcmp(rust_type, "String") == 0 || strcmp(rust_type, "str") == 0 || strcmp(rust_type, "&str") == 0)) return "char*";
-    if (rust_type && (strcmp(rust_type, "i32") == 0 || strcmp(rust_type, "int") == 0)) return "int";
-    if (rust_type && (strcmp(rust_type, "u32") == 0 || strcmp(rust_type, "unsigned int") == 0)) return "unsigned int";
-    if (rust_type && (strcmp(rust_type, "i64") == 0 || strcmp(rust_type, "long long") == 0)) return "long long";
-    if (rust_type && (strcmp(rust_type, "u64") == 0 || strcmp(rust_type, "unsigned long long") == 0)) return "unsigned long long";
-    if (rust_type && (strcmp(rust_type, "usize") == 0 || strcmp(rust_type, "size_t") == 0)) return "size_t";
-    if (rust_type && (strcmp(rust_type, "isize") == 0 || strcmp(rust_type, "ssize_t") == 0)) return "ssize_t";
-    if (rust_type && (strcmp(rust_type, "i8") == 0 || strcmp(rust_type, "signed char") == 0 || strcmp(rust_type, "char") == 0)) return "char";
-    if (rust_type && (strcmp(rust_type, "u8") == 0 || strcmp(rust_type, "unsigned char") == 0)) return "unsigned char";
-    if (strcmp(rust_type, "i16") == 0 || strcmp(rust_type, "short") == 0) return "short";
-    if (strcmp(rust_type, "u16") == 0 || strcmp(rust_type, "unsigned short") == 0) return "unsigned short";
+    if (rust_type && (strcmp(rust_type, "i32") == 0 || strcmp(rust_type, "int") == 0)) return "i32";
+    if (rust_type && (strcmp(rust_type, "u32") == 0 || strcmp(rust_type, "unsigned int") == 0)) return "u32";
+    if (rust_type && (strcmp(rust_type, "i64") == 0 || strcmp(rust_type, "long long") == 0)) return "i64";
+    if (rust_type && (strcmp(rust_type, "u64") == 0 || strcmp(rust_type, "unsigned long long") == 0)) return "u64";
+    if (rust_type && (strcmp(rust_type, "usize") == 0 || strcmp(rust_type, "size_t") == 0)) return "usize";
+    if (rust_type && (strcmp(rust_type, "isize") == 0 || strcmp(rust_type, "ssize_t") == 0)) return "isize";
+    if (rust_type && (strcmp(rust_type, "i8") == 0 || strcmp(rust_type, "signed char") == 0 || strcmp(rust_type, "char") == 0)) return "i8";
+    if (rust_type && (strcmp(rust_type, "u8") == 0 || strcmp(rust_type, "unsigned char") == 0)) return "u8";
+    if (strcmp(rust_type, "i16") == 0 || strcmp(rust_type, "short") == 0) return "int16_t";
+    if (strcmp(rust_type, "u16") == 0 || strcmp(rust_type, "unsigned short") == 0) return "uint16_t";
     if (strcmp(rust_type, "String") == 0) return "char*";
     if (strcmp(rust_type, "str") == 0) return "char*";
     if (strcmp(rust_type, "&str") == 0) return "char*";
@@ -88,36 +90,19 @@ static const char* map_type(const char* rust_type) {
             }
 
             // Map common Rust primitives to their C-style names used in specialization
-            if (strstr(buf, "_i32")) { /* Replace _i32 with _int */
-                char *p = strstr(buf, "_i32");
-                memcpy(p, "_int", 4);
-                memmove(p+4, p+4, strlen(p+4)+1);
-            }
-            if (strstr(buf, "_i8")) {
-                char *p = strstr(buf, "_i8");
-                memcpy(p, "_char", 5);
-                memmove(p+5, p+3, strlen(p+3)+1);
-            }
-            if (strstr(buf, "_u8")) {
-                char *p = strstr(buf, "_u8");
-                memcpy(p, "_char", 5);
-                memmove(p+5, p+3, strlen(p+3)+1);
-            }
-            if (strstr(buf, "_unsigned_char")) {
-                char *p = strstr(buf, "_unsigned_char");
-                memcpy(p, "_char", 5);
-                memmove(p+5, p+14, strlen(p+14)+1);
-            }
-            if (strstr(buf, "Ref_u8")) {
-                char *p = strstr(buf, "Ref_u8");
-                memcpy(p, "Ref_char", 8);
-                memmove(p+8, p+6, strlen(p+6)+1);
-            }
-            if (strstr(buf, "Ref_unsigned_char")) {
-                char *p = strstr(buf, "Ref_unsigned_char");
-                memcpy(p, "Ref_char", 8);
-                memmove(p+8, p+17, strlen(p+17)+1);
-            }
+            if (strstr(buf, "_i32")) { char *p = strstr(buf, "_i32"); memcpy(p, "_i32", 4); memmove(p+4, p+4, strlen(p+4)+1); }
+            if (strstr(buf, "_int")) { char *p = strstr(buf, "_int"); memcpy(p, "_i32", 4); memmove(p+4, p+4, strlen(p+4)+1); }
+            if (strstr(buf, "_i8")) { char *p = strstr(buf, "_i8"); memcpy(p, "_i8", 3); memmove(p+3, p+3, strlen(p+3)+1); }
+            if (strstr(buf, "_u8")) { char *p = strstr(buf, "_u8"); memcpy(p, "_u8", 3); memmove(p+3, p+3, strlen(p+3)+1); }
+            if (strstr(buf, "_unsigned_char")) { char *p = strstr(buf, "_unsigned_char"); memcpy(p, "_u8", 3); memmove(p+3, p+14, strlen(p+14)+1); }
+            if (strstr(buf, "_signed_char")) { char *p = strstr(buf, "_signed_char"); memcpy(p, "_i8", 3); memmove(p+3, p+12, strlen(p+12)+1); }
+            if (strstr(buf, "_char")) { char *p = strstr(buf, "_char"); memcpy(p, "_i8", 3); memmove(p+3, p+5, strlen(p+5)+1); }
+            if (strstr(buf, "Ref_u8")) { char *p = strstr(buf, "Ref_u8"); memcpy(p, "Ref_u8", 6); memmove(p+6, p+6, strlen(p+6)+1); }
+            if (strstr(buf, "Ref_i8")) { char *p = strstr(buf, "Ref_i8"); memcpy(p, "Ref_i8", 6); memmove(p+6, p+6, strlen(p+6)+1); }
+            if (strstr(buf, "Ref_char")) { char *p = strstr(buf, "Ref_char"); memcpy(p, "Ref_i8", 6); memmove(p+6, p+8, strlen(p+8)+1); }
+            if (strstr(buf, "Ref_unsigned_char")) { char *p = strstr(buf, "Ref_unsigned_char"); memcpy(p, "Ref_u8", 6); memmove(p+6, p+17, strlen(p+17)+1); }
+            if (strstr(buf, "Ref_signed_char")) { char *p = strstr(buf, "Ref_signed_char"); memcpy(p, "Ref_i8", 6); memmove(p+6, p+15, strlen(p+15)+1); }
+            if (strstr(buf, "Ref_str")) { char *p = strstr(buf, "Ref_str"); memcpy(p, "Ref_str", 7); memmove(p+7, p+7, strlen(p+7)+1); }
             
             free(copy);
             return buf;
@@ -435,6 +420,7 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             break;
         }
         case AST_ENUM_DECL: {
+            if (node->data.enum_decl.is_generic) return;
             fprintf(out, "#ifndef TAG_%s_DEFINED\n", node->data.enum_decl.name);
             fprintf(out, "#define TAG_%s_DEFINED\n", node->data.enum_decl.name);
             fprintf(out, "enum %s_tag { TAG_%s_NONE", node->data.enum_decl.name, node->data.enum_decl.name);
@@ -1270,6 +1256,8 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             }
             break;
         case AST_STRUCT_DECL:
+            if (node->data.struct_decl.is_generic) return;
+            if (strcmp(node->data.struct_decl.name, "Vec_i32") == 0 || strcmp(node->data.struct_decl.name, "Vec_u8") == 0 || strcmp(node->data.struct_decl.name, "Vec_i8") == 0) return;
             fprintf(out, "struct %s {\n", node->data.struct_decl.name);
             for (int i = 0; i < node->data.struct_decl.field_count; i++) { fprintf(out, "    "); codegen_node(node->data.struct_decl.fields[i], out); fprintf(out, ";\n"); }
             fprintf(out, "};\n\n");
@@ -1360,6 +1348,68 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             break;
     }
     current_table = old_table_inner;
+}
+
+void codegen_emit_enum_tags(ASTNode *node, FILE *out) {
+    if (node->type != AST_ENUM_DECL) return;
+    fprintf(out, "#ifndef TAG_%s_DEFINED\n", node->data.enum_decl.name);
+    fprintf(out, "#define TAG_%s_DEFINED\n", node->data.enum_decl.name);
+    fprintf(out, "enum %s_tag { TAG_%s_NONE", node->data.enum_decl.name, node->data.enum_decl.name);
+    for (int i = 0; i < node->data.enum_decl.variant_count; i++) {
+        fprintf(out, ", TAG_%s_%s", node->data.enum_decl.name, node->data.enum_decl.variants[i]->data.enum_variant.name);
+    }
+    fprintf(out, " };\n");
+    fprintf(out, "#endif\n");
+}
+
+void codegen_emit_type_body(ASTNode *node, FILE *out) {
+    if (node->type == AST_STRUCT_DECL) {
+        if (node->data.struct_decl.is_generic) return;
+        if (strcmp(node->data.struct_decl.name, "Vec_i32") == 0 || strcmp(node->data.struct_decl.name, "Vec_u8") == 0 || strcmp(node->data.struct_decl.name, "Vec_i8") == 0) return;
+        fprintf(out, "struct %s {\n", node->data.struct_decl.name);
+        for (int i = 0; i < node->data.struct_decl.field_count; i++) { fprintf(out, "    "); codegen_node(node->data.struct_decl.fields[i], out); fprintf(out, ";\n"); }
+        fprintf(out, "};\n\n");
+        fprintf(out, "static struct %s %s_new_default() { struct %s res; memset(&res, 0, sizeof(res)); return res; }\n", node->data.struct_decl.name, node->data.struct_decl.name, node->data.struct_decl.name);
+    } else if (node->type == AST_ENUM_DECL) {
+        if (node->data.enum_decl.is_generic) return;
+        fprintf(out, "struct %s {\n", node->data.enum_decl.name);
+        fprintf(out, "    enum %s_tag tag;\n", node->data.enum_decl.name);
+        fprintf(out, "    union {\n");
+        for (int i = 0; i < node->data.enum_decl.variant_count; i++) {
+            ASTNode *variant = node->data.enum_decl.variants[i];
+            if (variant->data.enum_variant.variant_type == AST_CALL) {
+                fprintf(out, "        struct { ");
+                for (int j = 0; j < variant->data.enum_variant.field_count; j++) {
+                    fprintf(out, "%s _%d; ", map_type(variant->data.enum_variant.fields[j]->data.param.type_name), j);
+                }
+                fprintf(out, "} %s;\n", variant->data.enum_variant.name);
+            } else if (variant->data.enum_variant.variant_type == AST_STRUCT_DECL) {
+                fprintf(out, "        struct { ");
+                for (int j = 0; j < variant->data.enum_variant.field_count; j++) {
+                    fprintf(out, "%s %s; ", map_type(variant->data.enum_variant.fields[j]->data.param.type_name), variant->data.enum_variant.fields[j]->data.param.name);
+                }
+                fprintf(out, "} %s;\n", variant->data.enum_variant.name);
+            }
+        }
+        fprintf(out, "    } data;\n");
+        fprintf(out, "};\n\n");
+        fprintf(out, "static struct %s %s_new() { struct %s res; memset(&res, 0, sizeof(res)); return res; }\n", node->data.enum_decl.name, node->data.enum_decl.name, node->data.enum_decl.name);
+        for (int i = 0; i < node->data.enum_decl.variant_count; i++) {
+            ASTNode *variant = node->data.enum_decl.variants[i];
+            if (variant->data.enum_variant.variant_type == AST_CALL) {
+                fprintf(out, "static struct %s %s_%s(", node->data.enum_decl.name, node->data.enum_decl.name, variant->data.enum_variant.name);
+                for (int j = 0; j < variant->data.enum_variant.field_count; j++) {
+                    if (j > 0) fprintf(out, ", ");
+                    fprintf(out, "%s _%d", map_type(variant->data.enum_variant.fields[j]->data.param.type_name), j);
+                }
+                fprintf(out, ") { struct %s res; res.tag = TAG_%s_%s; ", node->data.enum_decl.name, node->data.enum_decl.name, variant->data.enum_variant.name);
+                for (int j = 0; j < variant->data.enum_variant.field_count; j++) {
+                    fprintf(out, "res.data.%s._%d = _%d; ", variant->data.enum_variant.name, j, j);
+                }
+                fprintf(out, "return res; }\n");
+            }
+        }
+    }
 }
 
 void codegen_generate(ASTNode *node, FILE *out, Target target, const char *crate_name) {

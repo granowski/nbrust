@@ -81,6 +81,10 @@ static char *mangle_name(const char *base, char **args, int count) {
         if (strcmp(arg, "V") == 0) arg = "i32";
         if (strcmp(arg, "T") == 0) arg = "i32";
         if (strcmp(arg, "int") == 0) arg = "i32";
+        if (strcmp(arg, "unsigned int") == 0) arg = "u32";
+        if (strcmp(arg, "unsigned char") == 0) arg = "u8";
+        if (strcmp(arg, "signed char") == 0) arg = "i8";
+        if (strcmp(arg, "char") == 0) arg = "i8";
         strcat(buf, "_"); 
         for (int j = 0; arg[j]; j++) {
             if (arg[j] == '&') strcat(buf, "Ref");
@@ -93,8 +97,8 @@ static char *mangle_name(const char *base, char **args, int count) {
     }
     if (strstr(buf, "_i32")) { char *p = strstr(buf, "_i32"); memcpy(p, "_i32", 4); memmove(p+4, p+4, strlen(p+4)+1); }
     else if (strstr(buf, "_int")) { char *p = strstr(buf, "_int"); memcpy(p, "_i32", 4); memmove(p+4, p+4, strlen(p+4)+1); }
-    if (strstr(buf, "_i8")) { char *p = strstr(buf, "_i8"); memcpy(p, "_char", 5); memmove(p+5, p+3, strlen(p+3)+1); }
-    if (strstr(buf, "_u8")) { char *p = strstr(buf, "_u8"); memcpy(p, "_char", 5); memmove(p+5, p+3, strlen(p+3)+1); }
+    if (strstr(buf, "_i8")) { char *p = strstr(buf, "_i8"); memcpy(p, "_i8", 3); memmove(p+3, p+3, strlen(p+3)+1); }
+    if (strstr(buf, "_u8")) { char *p = strstr(buf, "_u8"); memcpy(p, "_u8", 3); memmove(p+3, p+3, strlen(p+3)+1); }
     return strdup(buf);
 }
 
@@ -102,16 +106,71 @@ static ASTNode *specialize_node(ASTNode *node, char **params, char **args, int c
 
 static char *substitute_type(const char *type, char **params, char **args, int count) {
     if (!type) return NULL;
+    if (strcmp(type, "mut") == 0) return strdup("");
+    
+    // Handle &T or &mut T or &mut Self
+    if (type[0] == '&') {
+        const char *inner = type + 1;
+        int is_mut = 0;
+        if (strncmp(inner, "mut ", 4) == 0) {
+            inner += 4;
+            is_mut = 1;
+        }
+        char *sub_inner = substitute_type(inner, params, args, count);
+        char buf[256];
+        snprintf(buf, sizeof(buf), "&%s", sub_inner);
+        free(sub_inner);
+        return strdup(buf);
+    }
+
+    if (strstr(type, "mut ")) {
+        char *type_copy = strdup(type);
+        char *p;
+        while ((p = strstr(type_copy, "mut "))) {
+             memmove(p, p + 4, strlen(p + 4) + 1);
+        }
+        char *res = substitute_type(type_copy, params, args, count);
+        free(type_copy);
+        return res;
+    }
+    
     for (int i = 0; i < count; i++) {
         if (!params[i]) continue;
         // Optimization: if the type IS exactly the parameter, return the argument immediately
         if (strcmp(type, params[i]) == 0) return strdup(args[i]);
     }
     if (strcmp(type, "Self") == 0) {
-        // Find the struct name from the context if possible, but for now we often replace it in caller
+        for (int i = 0; i < count; i++) {
+            if (strcmp(params[i], "Self") == 0) return strdup(args[i]);
+        }
     }
+    if (strcmp(type, "Self::Item") == 0 || strcmp(type, "Item") == 0) {
+        for (int i = 0; i < count; i++) {
+            if (strcmp(params[i], "Item") == 0) return strdup(args[i]);
+        }
+        return strdup("i32");
+    }
+    if (strcmp(type, "T") == 0) return strdup("i32");
+    if (strcmp(type, "V") == 0) return strdup("i32");
+    if (strcmp(type, "K") == 0) return strdup("i32");
     if (strchr(type, '<')) {
         char *type_copy = strdup(type);
+        // Replace known generic parameters in the string itself
+        for (int i = 0; i < count; i++) {
+            if (!params[i]) continue;
+            char *p;
+            while ((p = strstr(type_copy, params[i]))) {
+                int plen = strlen(params[i]);
+                int alen = strlen(args[i]);
+                char *new_type = malloc(strlen(type_copy) - plen + alen + 1);
+                int offset = p - type_copy;
+                strncpy(new_type, type_copy, offset);
+                strcpy(new_type + offset, args[i]);
+                strcpy(new_type + offset + alen, p + plen);
+                free(type_copy);
+                type_copy = new_type;
+            }
+        }
         if (strstr(type_copy, "int")) {
              char *ni = strstr(type_copy, "int");
              ni[0] = 'i'; ni[1] = '3'; ni[2] = '2';
@@ -171,12 +230,62 @@ static char *substitute_type(const char *type, char **params, char **args, int c
 static ASTNode *specialize_node(ASTNode *node, char **params, char **args, int count) {
     if (!node) return NULL;
     ASTNode *new_node = ast_clone(node);
+    
+    // Force immediate substitution of generic parameters in specialized nodes
+    switch (node->type) {
+        case AST_FUNC:
+            if (new_node->data.func.return_type) {
+                char *old = new_node->data.func.return_type;
+                new_node->data.func.return_type = substitute_type(old, params, args, count);
+                free(old);
+            }
+            for (int i = 0; i < new_node->data.func.param_count; i++) {
+                ASTNode *param = new_node->data.func.params[i];
+                if (param->data.param.type_name) {
+                    char *old = param->data.param.type_name;
+                    param->data.param.type_name = substitute_type(old, params, args, count);
+                    free(old);
+                }
+            }
+            break;
+        case AST_STRUCT_DECL:
+            for (int i = 0; i < new_node->data.struct_decl.field_count; i++) {
+                ASTNode *field = new_node->data.struct_decl.fields[i];
+                if (field->data.param.type_name) {
+                    char *old = field->data.param.type_name;
+                    field->data.param.type_name = substitute_type(old, params, args, count);
+                    free(old);
+                }
+            }
+            break;
+        case AST_ENUM_DECL:
+            for (int i = 0; i < new_node->data.enum_decl.variant_count; i++) {
+                ASTNode *variant = new_node->data.enum_decl.variants[i];
+                for (int j = 0; j < variant->data.enum_variant.field_count; j++) {
+                    ASTNode *field = variant->data.enum_variant.fields[j];
+                    if (field->data.param.type_name) {
+                        char *old = field->data.param.type_name;
+                        field->data.param.type_name = substitute_type(old, params, args, count);
+                        free(old);
+                    }
+                }
+            }
+            break;
+        case AST_VAR_DECL:
+            if (new_node->data.var_decl.type_name) {
+                char *old = new_node->data.var_decl.type_name;
+                new_node->data.var_decl.type_name = substitute_type(old, params, args, count);
+                free(old);
+            }
+            break;
+        default: break;
+    }
+
     switch (node->type) {
         case AST_FUNC:
             if (new_node->data.func.name) {
                 char *old = new_node->data.func.name;
                 new_node->data.func.name = mangle_name(old, args, count); 
-                free(old); 
             }
             new_node->data.func.is_generic = 0; // It's now specialized
             new_node->data.func.is_specialized = 1;
@@ -1081,39 +1190,20 @@ void monomorphization_run(ASTNode *root) {
     if (!root) return;
     walk_and_specialize(root);
 }
-void monomorphization_emit_specializations(FILE *out, Target target) {
-    // PASS -1: Forward declare basic structs that might be used by specialized ones
-    fprintf(out, "#ifndef BASIC_FORWARDS_DEFINED\n");
-    fprintf(out, "#define BASIC_FORWARDS_DEFINED\n");
-    fprintf(out, "struct Ident;\n");
-    fprintf(out, "struct Vec;\n");
-    fprintf(out, "struct Vec_i32;\n");
-    fprintf(out, "struct Box;\n");
-    fprintf(out, "struct String;\n");
-    fprintf(out, "struct Vec_i32 { int* data; size_t len; size_t cap; };\n");
-    fprintf(out, "static inline struct Vec_i32 Vec_i32_new() { struct Vec_i32 v; v.data = malloc(sizeof(int)*10); v.len = 0; v.cap = 10; return v; }\n");
-    fprintf(out, "static inline void Vec_i32_push(struct Vec_i32* v, int val) { v->data[v->len++] = val; }\n");
-    fprintf(out, "static inline size_t Vec_i32_len(struct Vec_i32* v) { return v->len; }\n");
-    fprintf(out, "static inline int Vec_i32_is_empty(struct Vec_i32* v) { return v->len == 0; }\n");
-    fprintf(out, "#endif\n\n");
-
-    // Zero pass: Forward declare all specialized types to avoid incomplete type errors
+void monomorphization_emit_forwards(FILE *out, Target target) {
     SpecializationNode *fwd_curr = specializations;
     while (fwd_curr) {
         if (fwd_curr->node->type == AST_STRUCT_DECL || fwd_curr->node->type == AST_ENUM_DECL) {
+             if (strcmp(fwd_curr->mangled_name, "mut") == 0 || strcmp(fwd_curr->mangled_name, "T") == 0 || strcmp(fwd_curr->mangled_name, "V") == 0 || strcmp(fwd_curr->mangled_name, "Self_Item") == 0) {
+                 fwd_curr = fwd_curr->next; continue;
+             }
              fprintf(out, "struct %s;\n", fwd_curr->mangled_name);
         }
         fwd_curr = fwd_curr->next;
     }
-    // Also forward declare non-generic structs
-    // This is needed because specializations might refer to them and they might be defined later.
-    // We should ideally iterate over all_nodes but we don't have it here.
-    fprintf(out, "struct Ident;\ntypedef struct Ident Ident;\n");
-    fprintf(out, "struct Node_vtable;\nstruct Node_object;\n");
-    fprintf(out, "struct Self_Item;\nstruct Self_Self;\n"); // HACK for incomplete types
-    fprintf(out, "\n");
+}
 
-    // First pass: Emit tag definitions for enums
+void monomorphization_emit_enum_tags(FILE *out, Target target) {
     SpecializationNode *tag_curr = specializations;
     while (tag_curr) {
         if (tag_curr->node->type == AST_ENUM_DECL) {
@@ -1128,11 +1218,17 @@ void monomorphization_emit_specializations(FILE *out, Target target) {
         }
         tag_curr = tag_curr->next;
     }
-    fprintf(out, "\n");
+}
 
+void monomorphization_emit_type_bodies(FILE *out, Target target) {
     SpecializationNode *type_curr = specializations;
     while (type_curr) {
         if (type_curr->node->type == AST_STRUCT_DECL || type_curr->node->type == AST_ENUM_DECL) {
+            if (strcmp(type_curr->mangled_name, "Vec_i32") == 0 || strcmp(type_curr->mangled_name, "Vec_u8") == 0 || strcmp(type_curr->mangled_name, "Vec_i8") == 0 || strcmp(type_curr->mangled_name, "String") == 0 ||
+                strcmp(type_curr->mangled_name, "mut") == 0 || strcmp(type_curr->mangled_name, "T") == 0 || strcmp(type_curr->mangled_name, "V") == 0 || strcmp(type_curr->mangled_name, "Self_Item") == 0) {
+                 type_curr = type_curr->next;
+                 continue;
+            }
             // Ensure nodes are marked correctly for codegen
             if (type_curr->node->type == AST_STRUCT_DECL) {
                 type_curr->node->data.struct_decl.is_generic = 0;
@@ -1141,17 +1237,21 @@ void monomorphization_emit_specializations(FILE *out, Target target) {
                 type_curr->node->data.enum_decl.is_generic = 0;
                 type_curr->node->data.enum_decl.is_specialized = 1;
             }
-            // codegen_generate(type_curr->node, out, target, NULL);
-            codegen_generate(type_curr->node, out, target, NULL);
+            codegen_emit_type_body(type_curr->node, out);
         }
         type_curr = type_curr->next;
     }
+}
 
-    // Third pass: Emit specialized functions/methods
+void monomorphization_emit_methods(FILE *out, Target target) {
     SpecializationNode *emit_curr = specializations;
     while (emit_curr) {
         if (emit_curr->node->type != AST_STRUCT_DECL && emit_curr->node->type != AST_ENUM_DECL) {
             if (emit_curr->node->type == AST_FUNC) {
+                if ((strstr(emit_curr->node->data.func.name, "Vec_i32") || strstr(emit_curr->node->data.func.name, "Vec_u8") || strstr(emit_curr->node->data.func.name, "Vec_i8")) && (strstr(emit_curr->node->data.func.name, "_new") || strstr(emit_curr->node->data.func.name, "_push") || strstr(emit_curr->node->data.func.name, "_len") || strstr(emit_curr->node->data.func.name, "_is_empty"))) {
+                    emit_curr = emit_curr->next;
+                    continue;
+                }
                 emit_curr->node->data.func.is_generic = 0;
                 emit_curr->node->data.func.is_specialized = 1;
             }
@@ -1159,4 +1259,8 @@ void monomorphization_emit_specializations(FILE *out, Target target) {
         }
         emit_curr = emit_curr->next;
     }
+}
+
+void monomorphization_emit_specializations(FILE *out, Target target) {
+    // Legacy function, no longer used in new multi-pass system
 }

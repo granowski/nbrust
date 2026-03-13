@@ -155,22 +155,51 @@ int main(int argc, char **argv) {
         if (!f) { perror("fopen tmp"); return 1; }
         
         if (target.backend == BACKEND_C) {
-            fprintf(f, "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n");
-            fprintf(f, "typedef int i32;\ntypedef long long i64;\ntypedef unsigned int u32;\ntypedef unsigned long long u64;\ntypedef size_t usize;\n");
+            fprintf(f, "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n#include <stdbool.h>\n#include <stdint.h>\n\n");
+            fprintf(f, "typedef int32_t i32;\ntypedef uint32_t u32;\ntypedef int64_t i64;\ntypedef uint64_t u64;\ntypedef uint8_t u8;\ntypedef int8_t i8;\ntypedef size_t usize;\ntypedef ssize_t isize;\n\n");
             
-            // Re-re-re-re-order for full definitions:
-            // 1. All non-generic types (Ident, etc)
+            // Re-order for full definitions:
+            // 1. Forward declarations for all types (non-generic and specialized)
             for (int i = 0; i < all_node_count; i++) {
                 ASTNode *ast = all_nodes[i];
                 if (ast->type == AST_STRUCT_DECL || ast->type == AST_ENUM_DECL) {
-                    codegen_generate(ast, f, target, current_crate_name);
+                    if ((ast->type == AST_STRUCT_DECL && ast->data.struct_decl.generic_param_count == 0) ||
+                        (ast->type == AST_ENUM_DECL && ast->data.enum_decl.generic_param_count == 0)) {
+                        fprintf(f, "struct %s;\n", (ast->type == AST_STRUCT_DECL) ? ast->data.struct_decl.name : ast->data.enum_decl.name);
+                    }
                 }
             }
+            monomorphization_emit_forwards(f, target);
+            fprintf(f, "\n");
+
+            // 2. Enum tag definitions
+            for (int i = 0; i < all_node_count; i++) {
+                ASTNode *ast = all_nodes[i];
+                if (ast->type == AST_ENUM_DECL && ast->data.enum_decl.generic_param_count == 0) {
+                    codegen_emit_enum_tags(ast, f);
+                }
+            }
+            monomorphization_emit_enum_tags(f, target);
+            fprintf(f, "\n");
+
+            // 3. Struct and Enum bodies (no methods yet)
+            for (int i = 0; i < all_node_count; i++) {
+                ASTNode *ast = all_nodes[i];
+                if (ast->type == AST_STRUCT_DECL && ast->data.struct_decl.generic_param_count == 0) {
+                    codegen_emit_type_body(ast, f);
+                } else if (ast->type == AST_ENUM_DECL && ast->data.enum_decl.generic_param_count == 0) {
+                    codegen_emit_type_body(ast, f);
+                }
+            }
+            monomorphization_emit_type_bodies(f, target);
+            fprintf(f, "\n");
         }
 
         // Monomorphization emit needs to happen after we've processed all nodes
         // but before we generate code for them, so specialized structs are defined.
-        if (target.backend == BACKEND_C) monomorphization_emit_specializations(f, target);
+        if (target.backend == BACKEND_C) {
+             monomorphization_emit_methods(f, target);
+        }
 
         for (int i = 0; i < all_node_count; i++) {
             ASTNode *ast = all_nodes[i];
@@ -178,10 +207,10 @@ int main(int argc, char **argv) {
                              (ast->type == AST_STRUCT_DECL && ast->data.struct_decl.generic_param_count > 0) ||
                              (ast->type == AST_ENUM_DECL && ast->data.enum_decl.generic_param_count > 0);
             if (!is_generic && ast->type != AST_STRUCT_DECL && ast->type != AST_ENUM_DECL) {
-                codegen_generate(ast, f, target, current_crate_name);
-                if (target.backend == BACKEND_C && (ast->type == AST_BINOP || ast->type == AST_IDENT || ast->type == AST_LITERAL || ast->type == AST_CALL || ast->type == AST_METHOD_CALL || ast->type == AST_MACRO_CALL || ast->type == AST_FIELD_ACCESS || ast->type == AST_UNOP || ast->type == AST_IF || ast->type == AST_MATCH || ast->type == AST_BLOCK)) {
-                    fprintf(f, ";\n");
-                }
+            codegen_generate(ast, f, target, current_crate_name);
+            if (target.backend == BACKEND_C && (ast->type == AST_BINOP || ast->type == AST_IDENT || ast->type == AST_LITERAL || ast->type == AST_CALL || ast->type == AST_METHOD_CALL || ast->type == AST_MACRO_CALL || ast->type == AST_FIELD_ACCESS || ast->type == AST_UNOP || ast->type == AST_IF || ast->type == AST_MATCH || ast->type == AST_BLOCK || ast->type == AST_STRUCT_INIT)) {
+                fprintf(f, ";\n");
+            }
             }
         }
         fclose(f);
@@ -210,22 +239,60 @@ int main(int argc, char **argv) {
     } else {
         // Output to stdout
         if (target.backend == BACKEND_C) {
-            printf("#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n");
-            printf("typedef int i32;\ntypedef long long i64;\ntypedef unsigned int u32;\ntypedef unsigned long long u64;\ntypedef size_t usize;\n");
-            
-            // Re-re-re-re-order:
-            // 1. All non-generic types (Ident, etc)
+            printf("#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n#include <stdbool.h>\n#include <stdint.h>\n\n");
+            printf("typedef int32_t i32;\ntypedef uint32_t u32;\ntypedef int64_t i64;\ntypedef uint64_t u64;\ntypedef uint8_t u8;\ntypedef int8_t i8;\ntypedef size_t usize;\ntypedef ssize_t isize;\n\n");
+            printf("struct Vec_u8 { u8* data; usize len; usize cap; };\n");
+            printf("struct Vec_i32 { i32* data; usize len; usize cap; };\n");
+            printf("struct Vec_i8 { i8* data; usize len; usize cap; };\n\n");
+
+            // 1. Forwards
             for (int i = 0; i < all_node_count; i++) {
                 ASTNode *ast = all_nodes[i];
-                int is_generic = (ast->type == AST_STRUCT_DECL && ast->data.struct_decl.generic_param_count > 0) ||
-                                 (ast->type == AST_ENUM_DECL && ast->data.enum_decl.generic_param_count > 0);
-                if (!is_generic && (ast->type == AST_STRUCT_DECL || ast->type == AST_ENUM_DECL)) {
-                    codegen_generate(ast, stdout, target, current_crate_name);
+                if (ast->type == AST_STRUCT_DECL || ast->type == AST_ENUM_DECL) {
+                    if ((ast->type == AST_STRUCT_DECL && ast->data.struct_decl.generic_param_count == 0) ||
+                        (ast->type == AST_ENUM_DECL && ast->data.enum_decl.generic_param_count == 0)) {
+                        printf("struct %s;\n", (ast->type == AST_STRUCT_DECL) ? ast->data.struct_decl.name : ast->data.enum_decl.name);
+                    }
                 }
             }
+            monomorphization_emit_forwards(stdout, target);
+            printf("\n");
 
-            // 2. Monomorphization specializations (Vec_i32, etc)
-            monomorphization_emit_specializations(stdout, target);
+            // 2. Tags
+            for (int i = 0; i < all_node_count; i++) {
+                ASTNode *ast = all_nodes[i];
+                if (ast->type == AST_ENUM_DECL && ast->data.enum_decl.generic_param_count == 0) {
+                    codegen_emit_enum_tags(ast, stdout);
+                }
+            }
+            monomorphization_emit_enum_tags(stdout, target);
+            printf("\n");
+
+            // 3. Bodies
+            for (int i = 0; i < all_node_count; i++) {
+                ASTNode *ast = all_nodes[i];
+                if (ast->type == AST_STRUCT_DECL && ast->data.struct_decl.generic_param_count == 0 && strcmp(ast->data.struct_decl.name, "Ident") == 0) {
+                    codegen_emit_type_body(ast, stdout);
+                }
+            }
+            for (int i = 0; i < all_node_count; i++) {
+                ASTNode *ast = all_nodes[i];
+                if (ast->type == AST_STRUCT_DECL && ast->data.struct_decl.generic_param_count == 0 && strcmp(ast->data.struct_decl.name, "String") == 0) {
+                    // codegen_emit_type_body(ast, stdout); // Defined manually
+                }
+            }
+            for (int i = 0; i < all_node_count; i++) {
+                ASTNode *ast = all_nodes[i];
+                if ((ast->type == AST_STRUCT_DECL || ast->type == AST_ENUM_DECL) && (ast->type != AST_STRUCT_DECL || (strcmp(ast->data.struct_decl.name, "String") != 0 && strcmp(ast->data.struct_decl.name, "Ident") != 0)) && 
+                    ((ast->type == AST_STRUCT_DECL && ast->data.struct_decl.generic_param_count == 0) || (ast->type == AST_ENUM_DECL && ast->data.enum_decl.generic_param_count == 0))) {
+                    codegen_emit_type_body(ast, stdout);
+                }
+            }
+            monomorphization_emit_type_bodies(stdout, target);
+            printf("\n");
+
+            // 4. Methods
+            monomorphization_emit_methods(stdout, target);
         }
         for (int i = 0; i < all_node_count; i++) {
              ASTNode *ast = all_nodes[i];
@@ -238,7 +305,7 @@ int main(int argc, char **argv) {
                  if (target.backend == BACKEND_C && (ast->type == AST_STRUCT_DECL || ast->type == AST_ENUM_DECL)) continue;
                  
                  codegen_generate(ast, stdout, target, current_crate_name);
-                 if (target.backend == BACKEND_C && (ast->type == AST_BINOP || ast->type == AST_IDENT || ast->type == AST_LITERAL || ast->type == AST_CALL || ast->type == AST_METHOD_CALL || ast->type == AST_MACRO_CALL || ast->type == AST_FIELD_ACCESS || ast->type == AST_UNOP || ast->type == AST_IF || ast->type == AST_MATCH || ast->type == AST_BLOCK || ast->type == AST_VAR_DECL)) {
+                 if (target.backend == BACKEND_C && (ast->type == AST_BINOP || ast->type == AST_IDENT || ast->type == AST_LITERAL || ast->type == AST_CALL || ast->type == AST_METHOD_CALL || ast->type == AST_MACRO_CALL || ast->type == AST_FIELD_ACCESS || ast->type == AST_UNOP || ast->type == AST_IF || ast->type == AST_MATCH || ast->type == AST_BLOCK || ast->type == AST_VAR_DECL || ast->type == AST_STRUCT_INIT)) {
                      printf(";\n");
                  }
              }
