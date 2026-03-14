@@ -155,8 +155,20 @@ int main(int argc, char **argv) {
         if (!f) { perror("fopen tmp"); return 1; }
         
         if (target.backend == BACKEND_C) {
-            fprintf(f, "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n#include <stdbool.h>\n#include <stdint.h>\n\n");
-            fprintf(f, "typedef int32_t i32;\ntypedef uint32_t u32;\ntypedef int64_t i64;\ntypedef uint64_t u64;\ntypedef uint8_t u8;\ntypedef int8_t i8;\ntypedef size_t usize;\ntypedef ssize_t isize;\n\n");
+            fprintf(f, "#include <stdio.h>\n"
+                       "#include <stdlib.h>\n"
+                       "#include <string.h>\n"
+                       "#include <stdbool.h>\n"
+                       "#include <stdint.h>\n\n");
+            fprintf(f, "typedef int32_t i32;\n"
+                       "typedef uint32_t u32;\n"
+                       "typedef int64_t i64;\n"
+                       "typedef uint64_t u64;\n"
+                       "typedef uint8_t u8;\n"
+                       "typedef int8_t i8;\n"
+                       "typedef size_t usize;\n"
+                       //"typedef ssize_t isize;\n"
+                       "\n");
             
             // Re-order for full definitions:
             // 1. Forward declarations for all types (non-generic and specialized)
@@ -239,8 +251,23 @@ int main(int argc, char **argv) {
     } else {
         // Output to stdout
         if (target.backend == BACKEND_C) {
-            printf("#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n#include <stdbool.h>\n#include <stdint.h>\n\n");
-            printf("typedef int32_t i32;\ntypedef uint32_t u32;\ntypedef int64_t i64;\ntypedef uint64_t u64;\ntypedef uint8_t u8;\ntypedef int8_t i8;\ntypedef size_t usize;\ntypedef ssize_t isize;\n\n");
+            printf(
+                "#include <stdio.h>\n"
+                "#include <stdlib.h>\n"
+                "#include <string.h>\n"
+                "#include <stdbool.h>\n"
+                "#include <stdint.h>\n"
+                "\n");
+            printf(
+                "typedef int32_t i32;\n"
+                "typedef uint32_t u32;\n"
+                "typedef int64_t i64;\n"
+                "typedef uint64_t u64;\n"
+                "typedef uint8_t u8;\n"
+                "typedef int8_t i8;\n"
+                "typedef size_t usize;\n"
+                //"typedef ssize_t isize;\n"
+                "\n");
             printf("struct Vec_u8 { u8* data; usize len; usize cap; };\n");
             printf("struct Vec_i32 { i32* data; usize len; usize cap; };\n");
             printf("struct Vec_i8 { i8* data; usize len; usize cap; };\n\n");
