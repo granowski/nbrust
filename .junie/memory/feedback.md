@@ -86,3 +86,11 @@
     "NEW INSTRUCTION": "WHEN user says a named test still failing THEN request exact build/run command, stderr log, and toolchain versions; propose minimal fix and revalidate"
 }
 
+[2026-04-09 13:30] - Updated by Junie
+{
+    "TYPE": "negative",
+    "CATEGORY": "test still failing",
+    "EXPECTATION": "User expects tests/for_test.rs to compile and run successfully and wants focus only on this test.",
+    "NEW INSTRUCTION": "WHEN user reports for_test.rs still failing THEN request exact command, full stderr, OS/arch; propose minimal, test-scoped fix and re-run"
+}
+

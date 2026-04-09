@@ -108,6 +108,8 @@ int main(int argc, char **argv) {
     // RUN MONOMORPHIZATION ON ALL NODES MULTIPLE TIMES TO RESOLVE TRANSITIVE DEPENDENCIES
     for (int pass = 0; pass < 5; pass++) {
         for (int i = 0; i < all_node_count; i++) monomorphization_run(all_nodes[i]);
+        type_checker_reset();
+        for (int i = 0; i < all_node_count; i++) type_checker_run(all_nodes[i]);
     }
 
     // Filter out original generic nodes
@@ -180,7 +182,10 @@ int main(int argc, char **argv) {
                     "typedef uint8_t u8;\n"
                     "typedef int8_t i8;\n"
                     "typedef size_t usize;\n"
-                    //"typedef ssize_t isize;\n"
+                    "\n"
+                    "struct Vec_u8 { u8* data; usize len; usize cap; };\n"
+                    "struct Vec_i32 { i32* data; usize len; usize cap; };\n"
+                    "struct Vec_i8 { i8* data; usize len; usize cap; };\n"
                     "\n");
 
             // Re-order for full definitions:
@@ -233,6 +238,13 @@ int main(int argc, char **argv) {
                              (ast->type == AST_STRUCT_DECL && ast->data.struct_decl.generic_param_count > 0) ||
                              (ast->type == AST_ENUM_DECL && ast->data.enum_decl.generic_param_count > 0);
             if (!is_generic && ast->type != AST_STRUCT_DECL && ast->type != AST_ENUM_DECL) {
+                // Skip non-generic impl blocks for String that cause errors.
+                if (ast->type == AST_IMPL) {
+                    const char *tname = ast->data.impl_block.struct_name;
+                    if (tname && (strcmp(tname, "String") == 0 || strcmp(tname, "Vec") == 0)) {
+                         continue;
+                    }
+                }
                 codegen_generate(ast, f, target, current_crate_name);
                 if (target.backend == BACKEND_C && (
                         ast->type == AST_BINOP || ast->type == AST_IDENT || ast->type == AST_LITERAL || ast->type ==

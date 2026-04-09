@@ -280,15 +280,30 @@ static Type *check_node(ASTNode *node) {
             Type *iterable_t = check_node(node->data.for_loop.iterable);
             node->data.for_loop.iterable->resolved_type = iterable_t;
             
-            // For now, simple inference for Vec and other iterables
-            Type *element_t = type_primitive(PRIM_I32); // Default
+            // Try to determine the element type of the iterable
+            Type *element_t = NULL;
             if (iterable_t && iterable_t->kind == TYPE_STRUCT) {
+                // Heuristic: Check if the struct has a next() method or is a Vec
                 if (strncmp(iterable_t->data.struct_type.name, "Vec_", 4) == 0) {
                     element_t = parse_type_string(iterable_t->data.struct_type.name + 4);
                 } else if (strncmp(iterable_t->data.struct_type.name, "VecIter_", 8) == 0) {
                     element_t = parse_type_string(iterable_t->data.struct_type.name + 8);
+                } else {
+                    // Look up the struct symbol to get its scope
+                    Symbol *struct_sym = symbol_table_lookup_path(current_table, iterable_t->data.struct_type.name);
+                    if (struct_sym && struct_sym->scope) {
+                        // Look for next() method in the struct's scope
+                        Symbol *s = symbol_table_lookup(struct_sym->scope, "next");
+                        if (s && s->type && s->type->kind == TYPE_FUNCTION) {
+                            Type *ret_t = s->type->data.function.return_type;
+                            if (ret_t && ret_t->kind == TYPE_ENUM && strncmp(ret_t->data.enum_type.name, "Option_", 7) == 0) {
+                                element_t = parse_type_string(ret_t->data.enum_type.name + 7);
+                            }
+                        }
+                    }
                 }
             }
+            if (!element_t) element_t = type_primitive(PRIM_I32); // Default fallback
             
             SymbolTable *old_table = current_table;
             current_table = symbol_table_new(old_table, "for_body");
@@ -654,10 +669,7 @@ static Type *check_node(ASTNode *node) {
 }
 
 void type_checker_reset() {
-    if (current_table) {
-        // symbol_table_free(current_table); // Might be too aggressive if nodes still point to it
-        current_table = NULL;
-    }
+    current_table = symbol_table_new(NULL, "crate");
 }
 
 void type_checker_run(ASTNode *root) {

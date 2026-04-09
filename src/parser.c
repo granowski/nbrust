@@ -1714,6 +1714,8 @@ ASTNode *parse_trait(Parser *p) {
             items[item_count++] = parse_type_alias(p);
         } else if (p->current.type == TOKEN_CONST) {
             items[item_count++] = parse_const(p);
+        } else if (p->current.type == TOKEN_SEMICOLON) {
+            consume(p, TOKEN_SEMICOLON);
         } else {
              // Skip unexpected
              token_free(p->current);
