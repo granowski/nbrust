@@ -124,18 +124,29 @@ pub struct String {
 
 impl String {
     pub fn from(s: &str) -> String {
-        let mut res = String { vec: Vec_char { data: 0 as *mut u8, len: 0, cap: 0 } };
-        // Simple mock: we don't have a way to loop over &str yet easily
+        let mut res = String { vec: Vec::new() };
+        let mut i = 0;
+        let bytes = s.as_bytes();
+        while i < bytes.len() {
+            res.vec.push(bytes[i]);
+            i = i + 1;
+        }
         res
     }
-    pub fn new_empty() -> String {
-        String { vec: Vec_char { data: 0 as *mut u8, len: 0, cap: 0 } }
+    pub fn new() -> String {
+        String { vec: Vec::new() }
     }
     pub fn len(&self) -> usize {
-        self.vec.len
+        self.vec.len()
     }
     pub fn push(&mut self, ch: u8) {
-        // Vec push is not implemented in mock yet
+        self.vec.push(ch);
+    }
+    pub fn as_bytes(&self) -> &[u8] {
+        self.vec.data as &[u8]
+    }
+    pub fn as_str(&self) -> &str {
+        self.vec.data as &str
     }
 }
 
