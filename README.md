@@ -92,7 +92,10 @@ With core feature parity achieved, the next milestones focus on stabilization an
 
 1. **Self-Hosting Verification**: Compiling `nbrust` and `nbcargo` using themselves on NetBSD.
 2. **Performance Optimization**: Reducing memory footprint and improving compilation speed.
-3. **Advanced Lifetime Analysis**: Moving towards full non-lexical lifetimes (NLL).
+3. **Advanced Lifetime Analysis**: Implementing Non-Lexical Lifetimes (NLL) to replace current scope-based checks.
 4. **Diagnostic Improvements**: Enhancing error reporting with more detailed spans and recovery.
-5. **Standard Library Completeness**: Implementing more of `std` as required by more complex crates.
-6. **Cargo Workspace Support**: Improving handling for multi-crate workspaces and build scripts.
+5. **Standard Library Completeness**: Implementing more of `std` (e.g., proper `HashMap`, `fs`, `thread`) as required by more complex crates.
+6. **Full Pattern Matching**: Adding support for match guards, ranges, and OR patterns (`|`).
+7. **`Drop` Trait & RAII**: Full integration of deterministic destruction for all types implementing the `Drop` trait.
+8. **Concurrency Primitives**: Implementing `std::thread`, `std::sync::Mutex`, and `std::sync::Arc` for multi-threaded support.
+9. **Cargo Workspace Support**: Improving handling for multi-crate workspaces and build scripts.
