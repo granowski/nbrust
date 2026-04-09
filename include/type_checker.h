@@ -5,5 +5,6 @@
 #include "symbol_table.h"
 
 void type_checker_run(ASTNode *root);
+void type_checker_reset();
 
 #endif

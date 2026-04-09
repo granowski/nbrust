@@ -123,7 +123,7 @@ int main(int argc, char **argv) {
     all_node_count = filtered_count;
 
     // IMPORTANT: Clear current_table before re-running type checker on specialized nodes
-    // type_checker_reset(); // Need to implement this
+    type_checker_reset();
 
     fprintf(stderr, "Running type checker...\n");
     fflush(stderr);

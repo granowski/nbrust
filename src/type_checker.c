@@ -123,10 +123,11 @@ static Type *check_node(ASTNode *node) {
                     if (init_t) t = init_t;
                 }
 
-                // If t is Result<i32, &str> and init_t is Result_int_Refchar, use the specialized type
-                if (t && init_t && (t->kind == TYPE_ENUM || t->kind == TYPE_STRUCT) && init_t->kind == TYPE_STRUCT) {
+                // If t is Result<i32, &str> and init_t is Result_i32_Refchar, use the specialized type
+                if (t && init_t && (t->kind == TYPE_ENUM || t->kind == TYPE_STRUCT) && (init_t->kind == TYPE_STRUCT || init_t->kind == TYPE_ENUM)) {
                     const char *target_name = (t->kind == TYPE_ENUM) ? t->data.enum_type.name : t->data.struct_type.name;
-                    if (target_name && strstr(init_t->data.struct_type.name, target_name)) {
+                    const char *init_name = (init_t->kind == TYPE_ENUM) ? init_t->data.enum_type.name : init_t->data.struct_type.name;
+                    if (target_name && init_name && strstr(init_name, target_name)) {
                         t = init_t;
                     }
                 }
@@ -269,8 +270,10 @@ static Type *check_node(ASTNode *node) {
             break;
         }
         case AST_MATCH: {
-            // check_node(node->data.match_stmt.expr);
-            check_node(node->data.match_stmt.expr);
+            Type *expr_t = check_node(node->data.match_stmt.expr);
+            if (node->data.match_stmt.expr->type == AST_IDENT) {
+                node->data.match_stmt.expr->resolved_type = expr_t;
+            }
             Type *arm_t = type_primitive(PRIM_VOID);
             for (int i = 0; i < node->data.match_stmt.arm_count; i++) {
                 ASTNode *arm = node->data.match_stmt.arms[i];
@@ -595,12 +598,16 @@ static Type *check_node(ASTNode *node) {
     return result;
 }
 
+void type_checker_reset() {
+    if (current_table) {
+        // symbol_table_free(current_table); // Might be too aggressive if nodes still point to it
+        current_table = NULL;
+    }
+}
+
 void type_checker_run(ASTNode *root) {
     if (!current_table) {
         current_table = symbol_table_new(NULL, "crate");
-        fprintf(stderr, "DEBUG: Created NEW current_table %p\n", current_table);
-    } else {
-        fprintf(stderr, "DEBUG: Using EXISTING current_table %p\n", current_table);
     }
     check_node(root);
 }

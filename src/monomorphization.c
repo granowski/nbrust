@@ -606,6 +606,27 @@ static void walk_and_specialize(ASTNode *node) {
                                 
                                 if (specialized) {
                                     register_specialization(mangled, specialized);
+                                    // Also specialize any methods in impl blocks for this enum/struct
+                                    GenericRegistryNode *curr = registry;
+                                    while (curr) {
+                                        if (curr->node->type == AST_IMPL && curr->node->data.impl_block.struct_name && strcmp(curr->node->data.impl_block.struct_name, base) == 0) {
+                                            ASTNode *new_impl = ast_clone(curr->node);
+                                            free(new_impl->data.impl_block.struct_name);
+                                            new_impl->data.impl_block.struct_name = strdup(mangled);
+                                            char **params = (generic->type == AST_STRUCT_DECL) ? generic->data.struct_decl.generic_params : generic->data.enum_decl.generic_params;
+                                            for (int i = 0; i < new_impl->data.impl_block.method_count; i++) {
+                                                ASTNode *method = specialize_node(curr->node->data.impl_block.methods[i], params, sub_args, arg_count);
+                                                if (method->type == AST_FUNC && method->data.func.name) {
+                                                    char *old_mname = method->data.func.name;
+                                                    char *new_mname = malloc(strlen(mangled) + 2 + strlen(old_mname) + 1);
+                                                    sprintf(new_mname, "%s_%s", mangled, old_mname);
+                                                    method->data.func.name = new_mname;
+                                                    register_specialization(method->data.func.name, method);
+                                                }
+                                            }
+                                        }
+                                        curr = curr->next;
+                                    }
                                 }
                             }
                         }
