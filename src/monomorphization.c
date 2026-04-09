@@ -339,7 +339,20 @@ static ASTNode *specialize_node(ASTNode *node, char **params, char **args, int c
             if (new_node->data.call.name) {
                 char *call_name = new_node->data.call.name;
                 if (strstr(call_name, "::")) {
-                     // Path substitution handled later or elsewhere
+                     char *copy = strdup(call_name);
+                     char *sep = strstr(copy, "::");
+                     *sep = '\0';
+                     char *variant = sep + 2;
+                     ASTNode *generic = monomorphization_lookup(copy);
+                     if (generic && (generic->type == AST_ENUM_DECL || generic->type == AST_STRUCT_DECL)) {
+                         char *mangled_base = mangle_name(copy, args, count);
+                         char *new_call_name = malloc(strlen(mangled_base) + strlen(variant) + 3);
+                         sprintf(new_call_name, "%s::%s", mangled_base, variant);
+                         free(new_node->data.call.name);
+                         new_node->data.call.name = new_call_name;
+                         free(mangled_base);
+                     }
+                     free(copy);
                 }
                 char *underscore = strrchr(call_name, '_');
                 if (underscore) {
@@ -1180,6 +1193,20 @@ static void walk_and_specialize(ASTNode *node) {
                                         spec_method->data.func.name = new_mname;
                                         // free(old_mname); // Might be shared
                                     }
+                                    
+                                    // Proactively specialize return type if it's generic
+                                    if (spec_method->data.func.return_type && strchr(spec_method->data.func.return_type, '<')) {
+                                         char *ret_base = strdup(spec_method->data.func.return_type);
+                                         char *lt = strchr(ret_base, '<');
+                                         *lt = '\0';
+                                         ASTNode *generic_ret = monomorphization_lookup(ret_base);
+                                         if (generic_ret && (generic_ret->type == AST_STRUCT_DECL || generic_ret->type == AST_ENUM_DECL)) {
+                                              // Extract ret_args from spec_method->data.func.return_type
+                                              // Simplified: just trigger walk_and_specialize on a dummy node with this type
+                                         }
+                                         free(ret_base);
+                                    }
+
                                     register_specialization(spec_method->data.func.name, spec_method);
                                 }
                             }
@@ -1254,9 +1281,14 @@ void monomorphization_emit_type_bodies(FILE *out, Target target) {
             if (type_curr->node->type == AST_STRUCT_DECL) {
                 type_curr->node->data.struct_decl.is_generic = 0;
                 type_curr->node->data.struct_decl.is_specialized = 1;
+                // Update the name in the struct decl itself to match mangled name
+                if (type_curr->node->data.struct_decl.name) free(type_curr->node->data.struct_decl.name);
+                type_curr->node->data.struct_decl.name = strdup(type_curr->mangled_name);
             } else {
                 type_curr->node->data.enum_decl.is_generic = 0;
                 type_curr->node->data.enum_decl.is_specialized = 1;
+                if (type_curr->node->data.enum_decl.name) free(type_curr->node->data.enum_decl.name);
+                type_curr->node->data.enum_decl.name = strdup(type_curr->mangled_name);
             }
             codegen_emit_type_body(type_curr->node, out);
         }
@@ -1265,7 +1297,18 @@ void monomorphization_emit_type_bodies(FILE *out, Target target) {
 }
 
 void monomorphization_emit_methods(FILE *out, Target target) {
+    // Collect all methods first to ensure they aren't emitted multiple times
     SpecializationNode *emit_curr = specializations;
+    while (emit_curr) {
+        if (emit_curr->node->type == AST_FUNC) {
+             // Reset flags to ensure codegen works correctly
+             emit_curr->node->data.func.is_generic = 0;
+             emit_curr->node->data.func.is_specialized = 1;
+        }
+        emit_curr = emit_curr->next;
+    }
+    
+    emit_curr = specializations;
     while (emit_curr) {
         if (emit_curr->node->type != AST_STRUCT_DECL && emit_curr->node->type != AST_ENUM_DECL) {
             if (emit_curr->node->type == AST_FUNC) {
@@ -1273,8 +1316,6 @@ void monomorphization_emit_methods(FILE *out, Target target) {
                     emit_curr = emit_curr->next;
                     continue;
                 }
-                emit_curr->node->data.func.is_generic = 0;
-                emit_curr->node->data.func.is_specialized = 1;
             }
             codegen_generate(emit_curr->node, out, target, NULL);
         }

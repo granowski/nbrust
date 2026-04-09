@@ -106,7 +106,7 @@ int main(int argc, char **argv) {
     for (int i = 0; i < all_node_count; i++) macro_expand_run(all_nodes[i]);
 
     // RUN MONOMORPHIZATION ON ALL NODES MULTIPLE TIMES TO RESOLVE TRANSITIVE DEPENDENCIES
-    for (int pass = 0; pass < 3; pass++) {
+    for (int pass = 0; pass < 5; pass++) {
         for (int i = 0; i < all_node_count; i++) monomorphization_run(all_nodes[i]);
     }
 

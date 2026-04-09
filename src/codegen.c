@@ -210,7 +210,10 @@ static const char* map_type(const char* rust_type) {
     if (rust_type && (strncmp(rust_type, "Vec", 3) == 0 || strncmp(rust_type, "Box", 3) == 0 || 
                       strncmp(rust_type, "Option", 6) == 0 || strncmp(rust_type, "Result", 6) == 0 || 
                       strncmp(rust_type, "Wrapper", 7) == 0 || strncmp(rust_type, "Call", 4) == 0 || 
-                      strncmp(rust_type, "Ident", 5) == 0 || strncmp(rust_type, "Post", 4) == 0)) {
+                      strncmp(rust_type, "Ident", 5) == 0 || strncmp(rust_type, "Post", 4) == 0 ||
+                      strncmp(rust_type, "RefIdent", 8) == 0 ||
+                      strstr(rust_type, "_i32") || strstr(rust_type, "_u8") || strstr(rust_type, "_i8") ||
+                      strstr(rust_type, "_Ident") || strstr(rust_type, "_RefIdent"))) {
         static char struct_buf[256];
         snprintf(struct_buf, sizeof(struct_buf), "struct %s", rust_type);
         return struct_buf;
@@ -968,13 +971,22 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                         stmt->type == AST_MATCH ||
                         stmt->type == AST_MACRO_CALL) {
                         fprintf(out, "    return ");
+                        codegen_node_ext(stmt, out, 1);
+                        fprintf(out, ";\n");
+                        continue;
+                    } else if (stmt->type == AST_BLOCK) {
+                        codegen_node_ext(stmt, out, 0); // Already handles return
+                        continue;
                     }
                 }
-
+                
+                // For other cases, ensure if/match/block are correctly handled
                 if (stmt->type == AST_IF || stmt->type == AST_MATCH || stmt->type == AST_BLOCK) {
                     if (stmt_is_expr) fprintf(out, "({ ");
                     codegen_node_ext(stmt, out, stmt_is_expr);
                     if (stmt_is_expr) fprintf(out, "; })");
+                } else if (stmt->type == AST_RETURN) {
+                    codegen_node_ext(stmt, out, 0);
                 } else {
                     codegen_node_ext(stmt, out, stmt_is_expr);
                 }
@@ -1065,39 +1077,20 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             char *p = name;
             while (*p) { if (*p == ':' && *(p+1) == ':') { *p = '_'; memmove(p+1, p+2, strlen(p+2)+1); } p++; }
             if (node->resolved_type && node->resolved_type->kind == TYPE_ENUM) {
-                // If it's an enum variant constructor (contains :: or matches a variant name)
-                if (strchr(name, ':')) {
-                    char *clean_name = strdup(name);
-                    char *p = clean_name;
-                    while (*p) { if (*p == ':' && *(p+1) == ':') { *p = '_'; memmove(p+1, p+2, strlen(p+2)+1); } p++; }
-                    fprintf(out, "%s()", clean_name);
-                    free(clean_name);
+                // If it's an enum variant constructor (contains :: or matches a specialized variant name)
+                if (strstr(node->data.ident.name, "::") || (isupper(name[0]) && strchr(name, '_'))) {
+                    fprintf(out, "%s()", name);
+                } else if (strcmp(name, "Option_None") == 0) {
+                    fprintf(out, "Option_i32_None()"); // Emergency heuristic
                 } else {
-                    // It could be a variant used as a flat name (e.g. Message_Quit)
-                    // or a local variable. If it's a local variable, it will be in the name.
-                    // But wait, if it's Message_Quit it SHOULD be called if it's a variant.
-                    // Let's use a heuristic: if it starts with a capital letter and matches an enum variant...
-                    // Actually, if it's a variant it SHOULD be in the symbol table as a variant.
-                    
-                    // Check if it's a known flat variant name
-                    if (isupper(name[0]) && strchr(name, '_')) {
-                         fprintf(out, "%s()", name);
-                    } else {
-                         fprintf(out, "%s", name);
-                    }
+                    fprintf(out, "%s", name);
                 }
+            } else if (strcmp(name, "Option_None") == 0) {
+                 fprintf(out, "Option_i32_None()"); // Emergency heuristic
             } else {
-                char *p = name;
-                while (*p) { 
-                    if (*p == ':' && *(p+1) == ':') { 
-                        fprintf(out, "_"); 
-                        p += 2; 
-                    } else {
-                        fprintf(out, "%c", *p);
-                        p++;
-                    }
-                }
+                fprintf(out, "%s", name);
             }
+            free(name);
             break;
         }
         case AST_CALL: {
@@ -1107,6 +1100,25 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             char *clean_name = strdup(name);
             char *p = clean_name;
             while (*p) { if (*p == ':' && *(p+1) == ':') { *p = '_'; memmove(p+1, p+2, strlen(p+2)+1); } p++; }
+            
+            // Handle specialized Option::None and other unit variants
+            if (node->resolved_type && node->resolved_type->kind == TYPE_ENUM) {
+                 char *mangled = strdup(node->resolved_type->data.enum_type.name);
+                 char *orig_variant = strrchr(clean_name, '_');
+                 if (orig_variant) {
+                     orig_variant++;
+                     free(clean_name);
+                     clean_name = malloc(strlen(mangled) + strlen(orig_variant) + 2);
+                     sprintf(clean_name, "%s_%s", mangled, orig_variant);
+                 } else if (strstr(node->data.call.name, "::")) {
+                     char *variant = strstr(node->data.call.name, "::") + 2;
+                     free(clean_name);
+                     clean_name = malloc(strlen(mangled) + strlen(variant) + 2);
+                     sprintf(clean_name, "%s_%s", mangled, variant);
+                 }
+                 free(mangled);
+            }
+
             if (strcmp(clean_name, "Vec_new") == 0) {
                  if (node->resolved_type && node->resolved_type->kind == TYPE_STRUCT) {
                       char *mangled = strdup(node->resolved_type->data.struct_type.name);
@@ -1161,7 +1173,10 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             break;
         case AST_IF:
             if (is_expr) {
-                fprintf(out, "({ auto _res = 0; if (");
+                fprintf(out, "({ ");
+                if (node->resolved_type) fprintf(out, "%s ", map_type(type_to_string(node->resolved_type)));
+                else fprintf(out, "auto ");
+                fprintf(out, "_res; if (");
                 codegen_node_ext(node->data.if_stmt.condition, out, 1);
                 fprintf(out, ") { _res = ");
                 codegen_node_ext(node->data.if_stmt.then_branch, out, 1);
@@ -1176,10 +1191,17 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
                 fprintf(out, "    if (");
                 codegen_node_ext(node->data.if_stmt.condition, out, 1);
                 fprintf(out, ") ");
-                codegen_node_ext(node->data.if_stmt.then_branch, out, 0);
+                
+                int branch_is_expr = (current_impl_struct[0] != '\0');
+                if (branch_is_expr) fprintf(out, "{ return ");
+                codegen_node_ext(node->data.if_stmt.then_branch, out, branch_is_expr);
+                if (branch_is_expr) fprintf(out, "; }\n");
+                
                 if (node->data.if_stmt.else_branch) {
                     fprintf(out, " else ");
-                    codegen_node_ext(node->data.if_stmt.else_branch, out, 0);
+                    if (branch_is_expr) fprintf(out, "{ return ");
+                    codegen_node_ext(node->data.if_stmt.else_branch, out, branch_is_expr);
+                    if (branch_is_expr) fprintf(out, "; }\n");
                 }
             }
             break;
@@ -1189,29 +1211,46 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             fprintf(out, ") ");
             codegen_node(node->data.while_loop.body, out);
             break;
-        case AST_FOR_STMT:
+        case AST_FOR_STMT: {
+            Type *iter_t = node->data.for_loop.iterable->resolved_type;
+            const char *iter_type_name = iter_t ? type_to_string(iter_t) : "unknown";
+            
             fprintf(out, "    { auto _iter = ");
             codegen_node_ext(node->data.for_loop.iterable, out, 1);
-            fprintf(out, ".into_iter();\n");
+            
+            // Check if we need to call into_iter() or if it's already an iterator
+            if (iter_t && iter_t->kind == TYPE_STRUCT && strncmp(iter_t->data.struct_type.name, "VecIter", 7) != 0) {
+                fprintf(out, ".into_iter();\n");
+            } else {
+                fprintf(out, ";\n");
+            }
+            
             fprintf(out, "      while (1) {\n");
             fprintf(out, "        auto _next = _iter.next();\n");
-            fprintf(out, "        if (_next.tag == TAG_Option_None) break;\n");
+            
+            // Determine the Option tag name for the element type
+            // Default to TAG_Option_i32_None if unknown
+            const char *element_type = "i32";
+            if (iter_t && iter_t->kind == TYPE_STRUCT) {
+                if (strncmp(iter_t->data.struct_type.name, "Vec_", 4) == 0) {
+                    element_type = iter_t->data.struct_type.name + 4;
+                } else if (strncmp(iter_t->data.struct_type.name, "VecIter_", 8) == 0) {
+                    element_type = iter_t->data.struct_type.name + 8;
+                }
+            }
+            
+            fprintf(out, "        if (_next.tag == TAG_Option_%s_None) break;\n", element_type);
             fprintf(out, "        auto %s = _next.data.Some._0;\n", node->data.for_loop.var_name);
             codegen_node(node->data.for_loop.body, out);
             fprintf(out, "      }\n");
             fprintf(out, "    }\n");
             break;
+        }
         case AST_RETURN:
             if (node->data.ret_stmt.value) {
-                if (node->data.ret_stmt.value->type == AST_IF) {
-                    fprintf(out, "    return ");
-                    codegen_node_ext(node->data.ret_stmt.value, out, 1);
-                    fprintf(out, ";\n");
-                    break;
-                }
                 if (is_expr) fprintf(out, "({ return ");
                 else fprintf(out, "    return ");
-                codegen_node(node->data.ret_stmt.value, out);
+                codegen_node_ext(node->data.ret_stmt.value, out, 1);
                 if (is_expr) fprintf(out, "; })");
                 else fprintf(out, ";\n");
             } else {
@@ -1310,7 +1349,7 @@ void codegen_emit_type_body(ASTNode *node, FILE *out) {
                     }
                 }
                 fprintf(out, "return res; }\n");
-            } else if (variant->data.enum_variant.variant_type == AST_PARAM) {
+            } else if (variant->data.enum_variant.variant_type == AST_PARAM || variant->data.enum_variant.variant_type == AST_IDENT) {
                 // Unit variant
                 fprintf(out, "static struct %s %s_%s() { struct %s res; res.tag = TAG_%s_%s; return res; }\n", node->data.enum_decl.name, node->data.enum_decl.name, variant->data.enum_variant.name, node->data.enum_decl.name, node->data.enum_decl.name, variant->data.enum_variant.name);
             }

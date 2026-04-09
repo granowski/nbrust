@@ -92,6 +92,21 @@ static Type *check_node(ASTNode *node) {
                 while (t->parent) t = t->parent;
                 s = symbol_table_lookup(t, node->data.ident.name);
             }
+            if (s && s->type && s->type->kind == TYPE_ENUM) {
+                result = s->type;
+                node->resolved_type = result;
+                // Check if it's a unit variant like Option::None
+                if (strstr(node->data.ident.name, "::")) {
+                    char *copy = strdup(node->data.ident.name);
+                    char *sep = strstr(copy, "::");
+                    *sep = '\0';
+                    char *variant = sep + 2;
+                    // If it is indeed a variant of this enum, result is already the enum type
+                    // but we can mark it for codegen if needed.
+                    free(copy);
+                }
+                break;
+            }
             if (!s) {
                 result = type_new(TYPE_UNKNOWN);
             } else {
@@ -262,10 +277,29 @@ static Type *check_node(ASTNode *node) {
             break;
         }
         case AST_FOR_STMT: {
-            // For now, assume it's valid if iterable is checked
-            check_node(node->data.for_loop.iterable);
-            // Ideally add var_name to a new scope
+            Type *iterable_t = check_node(node->data.for_loop.iterable);
+            node->data.for_loop.iterable->resolved_type = iterable_t;
+            
+            // For now, simple inference for Vec and other iterables
+            Type *element_t = type_primitive(PRIM_I32); // Default
+            if (iterable_t && iterable_t->kind == TYPE_STRUCT) {
+                if (strncmp(iterable_t->data.struct_type.name, "Vec_", 4) == 0) {
+                    element_t = parse_type_string(iterable_t->data.struct_type.name + 4);
+                } else if (strncmp(iterable_t->data.struct_type.name, "VecIter_", 8) == 0) {
+                    element_t = parse_type_string(iterable_t->data.struct_type.name + 8);
+                }
+            }
+            
+            SymbolTable *old_table = current_table;
+            current_table = symbol_table_new(old_table, "for_body");
+            current_table->is_block = 1;
+            node->scope = current_table;
+            
+            symbol_table_insert(current_table, node->data.for_loop.var_name, element_t);
+            
             check_node(node->data.for_loop.body);
+            
+            current_table = old_table;
             result = type_primitive(PRIM_VOID);
             break;
         }
@@ -308,6 +342,15 @@ static Type *check_node(ASTNode *node) {
                      if (ss && ss->scope) {
                           s = symbol_table_lookup(ss->scope, underscore + 1);
                      }
+                     if (!s) {
+                          // Try global search for struct
+                          SymbolTable *t = current_table;
+                          while (t->parent) t = t->parent;
+                          ss = symbol_table_lookup(t, copy);
+                          if (ss && ss->scope) {
+                               s = symbol_table_lookup(ss->scope, underscore + 1);
+                          }
+                     }
                      free(copy);
                 }
                 free(alt_name);
@@ -320,6 +363,18 @@ static Type *check_node(ASTNode *node) {
             } else if (!s || !s->type || s->type->kind != TYPE_FUNCTION) {
                 // Heuristic for built-in or unknown functions
                 result = type_primitive(PRIM_I32);
+                
+                // Special case for Option::None and similar
+                if (strstr(name, "::")) {
+                    char *name_copy = strdup(name);
+                    char *last_sep = strstr(name_copy, "::");
+                    *last_sep = '\0';
+                    Symbol *ss = symbol_table_lookup_path(current_table, name_copy);
+                    if (ss && ss->type && ss->type->kind == TYPE_ENUM) {
+                        result = ss->type;
+                    }
+                    free(name_copy);
+                }
             } else {
                 result = s->type->data.function.return_type;
                 // If it's a static method call Point::new or Point_new, the result should be Point
