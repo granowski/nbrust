@@ -5,6 +5,10 @@
 > [!NOTE]
 > This project was developed as a technical demonstration. The code in this repository was generated using the [**Junie CLI**](https://junie.jetbrains.com) powered by the [**Gemini 3 Flash**](https://deepmind.google/technologies/gemini/flash/) model. Later, I tried to use other locally installed LLMs using [**Ollama**](https://ollama.com) but mostly was unsuccessful at doing major construction of the compiler with non-cloud-based models.
 
+#### Goals
+
+The desire is that this compiler will be buildable with minimal dependencies. The goal is to not have any dependencies. We will reinvent the wheel if we have too. Ideally the compiler can be built with almost no dependencies because we want some form of modern Rust programming to be available to even smaller, and less supported, IoT devices. Devices like the PINE64 Ox64, which is a RISC-V based tiny board. At the end of the day, we want to provide a compiler that can bootstrap the official Rust project compiler to some extent so that one can then compile an official build of the Rust compiler for a new IoT device. Of course, we also intend to be a ground level example of how to build a compiler with no dependencies. The toolchain, should be as clean and pure as possible. There should never be silly OS specific things in the source as much as possible.
+
 #### Architecture
 
 - **Lexer (`src/lexer.c`, `include/lexer.h`)**: Converts Rust source code into a stream of tokens. It handles keywords (`fn`, `let`, `mut`, `enum`, `match`, `trait`, `impl`, `type`), identifiers, integers, and string literals.
@@ -21,27 +25,12 @@
 
 To build the project:
 ```bash
-make
-```
-
-On NetBSD or other systems using `bmake`:
-```bash
-make -f Makefile.bsd
-```
-
-If `make` fails, you can use the provided shell script to compile everything directly:
-```bash
-chmod +x build.sh
-./build.sh
+make all
 ```
 
 To clean the build artifacts:
 ```bash
 make clean
-```
-or
-```bash
-make -f Makefile.bsd clean
 ```
 
 #### Usage
