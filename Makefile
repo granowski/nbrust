@@ -57,6 +57,7 @@ ${OBJDIR}/%.o: %.c
 clean:
 	rm -rf ${OBJDIR} ${PROGS}
 	rm -f src/*.o cargo/*.o
+	rm -rf tmp/
 
 # Test target (optional)
 test:

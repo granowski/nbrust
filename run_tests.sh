@@ -1,5 +1,10 @@
 #!/bin/sh
 
+# Ensure directories exist
+rm -rf tmp/
+mkdir -p tmp/
+mkdir -p tmp/tests/
+
 # Colors for output
 GREEN='\033[0;32m'
 RED='\033[0;31m'
