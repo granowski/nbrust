@@ -1168,9 +1168,9 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             break;
         case AST_IDENT: {
             if (node->resolved_type) {
-                 fprintf(stderr, "DEBUG: codegen AST_IDENT name=%s type=%s (kind %d)\n", node->data.ident.name, type_to_string(node->resolved_type), node->resolved_type->kind);
+//                 fprintf(stderr, "DEBUG: codegen AST_IDENT name=%s type=%s (kind %d)\n", node->data.ident.name, type_to_string(node->resolved_type), node->resolved_type->kind);
             } else {
-                 fprintf(stderr, "DEBUG: codegen AST_IDENT name=%s type=NULL\n", node->data.ident.name);
+ //                fprintf(stderr, "DEBUG: codegen AST_IDENT name=%s type=NULL\n", node->data.ident.name);
             }
             char *name = strdup(node->data.ident.name);
             char *p = name;

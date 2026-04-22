@@ -30,7 +30,7 @@ void symbol_table_free(SymbolTable *table) {
 
 void symbol_table_insert(SymbolTable *table, const char *name, Type *type) {
     if (!table || !name) return;
-    fprintf(stderr, "DEBUG: symbol_table_insert table=%p name=%s\n", table, name);
+//    fprintf(stderr, "DEBUG: symbol_table_insert table=%p name=%s\n", table, name);
     Symbol *s = malloc(sizeof(Symbol));
     s->name = strdup(name);
     s->type = type;

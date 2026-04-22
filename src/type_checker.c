@@ -41,7 +41,7 @@ static Type *check_node(ASTNode *node);
 
 static Type *check_node(ASTNode *node) {
     if (!node) return type_primitive(PRIM_VOID);
-    fprintf(stderr, "DEBUG: check_node type=%d at line %d\n", node->type, node->line);
+//    fprintf(stderr, "DEBUG: check_node type=%d at line %d\n", node->type, node->line);
     
     Type *result = type_primitive(PRIM_VOID);
     switch (node->type) {
@@ -362,7 +362,7 @@ static Type *check_node(ASTNode *node) {
             // Ensure receiver IDENT has the same type
             if (node->data.method_call.receiver->type == AST_IDENT) {
                 node->data.method_call.receiver->resolved_type = receiver_t;
-                fprintf(stderr, "DEBUG: METHOD_CALL receiver '%s' resolved to kind %d\n", node->data.method_call.receiver->data.ident.name, receiver_t->kind);
+//                fprintf(stderr, "DEBUG: METHOD_CALL receiver '%s' resolved to kind %d\n", node->data.method_call.receiver->data.ident.name, receiver_t->kind);
             }
             Type *inner_t = receiver_t;
             if (receiver_t->kind == TYPE_REFERENCE) inner_t = receiver_t->data.reference.inner;
@@ -598,9 +598,9 @@ static Type *check_node(ASTNode *node) {
 void type_checker_run(ASTNode *root) {
     if (!current_table) {
         current_table = symbol_table_new(NULL, "crate");
-        fprintf(stderr, "DEBUG: Created NEW current_table %p\n", current_table);
+//        fprintf(stderr, "DEBUG: Created NEW current_table %p\n", current_table);
     } else {
-        fprintf(stderr, "DEBUG: Using EXISTING current_table %p\n", current_table);
+//        fprintf(stderr, "DEBUG: Using EXISTING current_table %p\n", current_table);
     }
     check_node(root);
 }
