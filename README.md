@@ -1,9 +1,9 @@
 ### nbrust: A Bare Minimum Rust-to-C Transpiler
 
-`nbrust` is a minimal implementation of a Rust compiler written in standard C, designed to be compiled and run on NetBSD using its standard toolchain and `bsdmake`. It transpiles a subset of Rust to C23 code, allowing for efficient execution on systems with a C compiler.
+`nbrust` is a minimal implementation of a Rust compiler written in standard C. 
 
 > [!NOTE]
-> This project was developed as a technical demonstration. 100% of the code in this repository was generated using the [**Junie CLI**](https://junie.jetbrains.com) powered by the [**Gemini 3 Flash**](https://deepmind.google/technologies/gemini/flash/) model.
+> This project was developed as a technical demonstration. The code in this repository was generated using the [**Junie CLI**](https://junie.jetbrains.com) powered by the [**Gemini 3 Flash**](https://deepmind.google/technologies/gemini/flash/) model. Later, I tried to use other locally installed LLMs using [**Ollama**](https://ollama.com) but mostly was unsuccessful at doing major construction of the compiler with non-cloud-based models.
 
 #### Architecture
 

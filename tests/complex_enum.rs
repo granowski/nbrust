@@ -14,19 +14,19 @@ fn main() {
 
     let msg2 = Message::Move { x: 10, y: 20 };
     match msg2 {
-        Message::Move { x, y } => println!("Move to %d, %d", x, y),
+        Message::Move { x, y } => println!("Move to {}, {}", x, y),
         _ => println!("Other"),
     }
 
     let msg3 = Message::Write("hello");
     match msg3 {
-        Message::Write(text) => println!("Write: %s", text),
+        Message::Write(text) => println!("Write: {}", text),
         _ => println!("Other"),
     }
 
     let msg4 = Message::ChangeColor(255, 0, 0);
     match msg4 {
-        Message::ChangeColor(r, g, b) => println!("Color: %d, %d, %d", r, g, b),
+        Message::ChangeColor(r, g, b) => println!("Color: {},{},{}", r, g, b),
         _ => println!("Other"),
     }
 }
