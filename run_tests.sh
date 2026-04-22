@@ -20,7 +20,7 @@ FAILED=0
 TOTAL=0
 
 # Temporary file for binary
-TMP_BIN="/tmp/test_bin"
+TMP_BIN="./tmp/test_bin"
 
 echo "Running tests in $TEST_DIR..."
 echo "---------------------------------------"
@@ -46,7 +46,7 @@ for test_file in "$TEST_DIR"/*.rs; do
     # Run nbrust and compile
     # We use -o to let nbrust handle the C compilation via cc
     # We capture stderr to check for borrow checker or other errors
-    $NBRUST "$test_file" -o "$TMP_BIN" > /tmp/nbrust_test.log 2>&1
+    $NBRUST "$test_file" -o "$TMP_BIN" > "./tmp/${test_file%%.*}-nbrust_test.log" 2>&1
     RET=$?
     
     if [ $RET -eq 0 ]; then
