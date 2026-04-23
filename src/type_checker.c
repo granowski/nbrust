@@ -388,7 +388,38 @@ static Type *check_node(ASTNode *node) {
             break;
         }
         case AST_MATCH_ARM: {
-            // Pattern should be checked too, but for now just body
+            // Check guard expression (must be bool)
+            if (node->data.match_arm.guard_expr) {
+                Type *guard_t = check_node(node->data.match_arm.guard_expr);
+                if (!type_equals(guard_t, type_primitive(PRIM_BOOL))) {
+                    fprintf(stderr, "Type error: Guard expression must be a boolean (got %s)\n",
+                            type_to_string(guard_t));
+                }
+            }
+
+            // Check range pattern (must be comparable types)
+            if (node->data.match_arm.range_start && node->data.match_arm.range_end) {
+                Type *start_t = check_node(node->data.match_arm.range_start);
+                Type *end_t = check_node(node->data.match_arm.range_end);
+                if (!type_equals(start_t, end_t)) {
+                    fprintf(stderr, "Type error: Range bounds must have compatible types (%s vs %s)\n",
+                            type_to_string(start_t), type_to_string(end_t));
+                }
+            }
+
+            // Check or-patterns (all must have same type)
+            if (node->data.match_arm.or_patterns && node->data.match_arm.or_pattern_count > 0) {
+                Type *first_t = check_node(node->data.match_arm.or_patterns[0]);
+                for (int i = 1; i < node->data.match_arm.or_pattern_count; i++) {
+                    Type *t = check_node(node->data.match_arm.or_patterns[i]);
+                    if (!type_equals(first_t, t)) {
+                        fprintf(stderr, "Type error: Or-patterns must have compatible types (%s vs %s)\n",
+                                type_to_string(first_t), type_to_string(t));
+                    }
+                }
+            }
+
+            // Check body expression
             result = check_node(node->data.match_arm.body);
             break;
         }

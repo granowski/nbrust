@@ -13,6 +13,7 @@ typedef enum {
     TOKEN_RPAREN,   // )
     TOKEN_LBRACE,   // {
     TOKEN_RBRACE,   // }
+    TOKEN_RARROW,   // ->
     TOKEN_COLON,    // :
     TOKEN_COLON_COLON, // ::
     TOKEN_SEMICOLON,// ;
@@ -35,6 +36,8 @@ typedef enum {
     TOKEN_BAR_BAR,  // ||
     TOKEN_BAR,      // |
     TOKEN_DOT,      // .
+    TOKEN_DOT_DOT,  // ..
+    TOKEN_DOT_DOT_EQ, // ..=
     TOKEN_STRING,   // "string"
     TOKEN_IF,       // if
     TOKEN_ELSE,     // else

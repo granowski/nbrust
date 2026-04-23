@@ -284,6 +284,60 @@ static void codegen_expr(ASTNode *node, FILE *out, Target target) {
             }
             fprintf(out, "    mov x0, x8\n");
             break;
+        case AST_MATCH_STMT:
+            // Define common fail label
+            int l_fail = next_label();
+            
+            for (int i = 0; i < node->data.match_stmt.arm_count; i++) {
+                ASTNode *arm = node->data.match_stmt.arms[i];
+                
+                // Define unique match label for this arm
+                int l_match = next_label();
+                
+                // Handle or-patterns (multiple patterns in one arm)
+                if (arm->data.match_arm.or_patterns && arm->data.match_arm.or_pattern_count > 1) {
+                    // Generate code to check each or-pattern in sequence
+                    for (int j = 0; j < arm->data.match_arm.or_pattern_count; j++) {
+                        ASTNode *or_pattern = arm->data.match_arm.or_patterns[j];
+                        // Generate pattern matching code for or_pattern
+                        codegen_expr(or_pattern, out, target);
+                        fprintf(out, "    cmp w0, #0\n");
+                        fprintf(out, "    b.ne .L%d\n", l_match);
+                    }
+                    
+                    // Default to fail label if no or-patterns match
+                    fprintf(out, "    b .L%d\n", l_fail);
+                }
+                
+                // Handle range patterns (start <= value <= end)
+                if (arm->data.match_arm.range_start && arm->data.match_arm.range_end) {
+                    // Generate code to compare value against range bounds
+                    codegen_expr(arm->data.match_arm.range_start, out, target);
+                    fprintf(out, "    mov w1, w0\n");
+                    codegen_expr(arm->data.match_arm.range_end, out, target);
+                    fprintf(out, "    cmp w0, w1\n");
+                    fprintf(out, "    b.gt .L%d\n", l_fail);
+                    fprintf(out, "    cmp w0, w1\n");
+                    fprintf(out, "    b.lt .L%d\n", l_fail);
+                }
+                
+                // Handle guard expressions (additional condition)
+                if (arm->data.match_arm.guard_expr) {
+                    codegen_expr(arm->data.match_arm.guard_expr, out, target);
+                    fprintf(out, "    cmp w0, #0\n");
+                    fprintf(out, "    b.eq .L%d\n", l_fail);
+                }
+                
+                // Generate code for the arm's body expression
+                codegen_expr(arm->data.match_arm.body, out, target);
+                
+                // Label for successful match
+                fprintf(out, ".L%d:\n", l_match);
+            }
+            
+            // Common fail label
+            fprintf(out, ".L%d:\n", l_fail);
+            break;
         default:
             fprintf(out, "    // Unsupported ARM64 expression node type %d\n", node->type);
             break;

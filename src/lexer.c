@@ -167,7 +167,16 @@ Token lexer_next_token(Lexer *l) {
             return make_token(TOKEN_COLON, ":", line, col);
         case ';': return make_token(TOKEN_SEMICOLON, ";", line, col);
         case ',': return make_token(TOKEN_COMMA, ",", line, col);
-        case '.': return make_token(TOKEN_DOT, ".", line, col);
+        case '.':
+            if (peek(l) == '.') {
+                advance(l);
+                if (peek(l) == '=') {
+                    advance(l);
+                    return make_token(TOKEN_DOT_DOT_EQ, "..=", line, col);
+                }
+                return make_token(TOKEN_DOT_DOT, "..", line, col);
+            }
+            return make_token(TOKEN_DOT, ".", line, col);
         case '+': return make_token(TOKEN_PLUS, "+", line, col);
         case '-':
             if (peek(l) == '>') {
