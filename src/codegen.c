@@ -1052,6 +1052,12 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
         case AST_PARAM:
             fprintf(out, "%s %s", map_type(node->data.param.type_name), node->data.param.name);
             break;
+        case AST_PATTERN:
+            // Handle pattern variables (e.g., "name" in "let name = ...")
+            fprintf(out, "char *%s = ", node->data.pattern.name);
+            codegen_node_ext(node->data.pattern.value, out, 1);
+            fprintf(out, ";\n");
+            break;
         case AST_BLOCK:
             if (is_expr) fprintf(out, "({ ");
             else fprintf(out, "{\n");

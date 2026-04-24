@@ -263,6 +263,8 @@ typedef struct ASTNode {
             char *type_name;
         } cast;
         struct {
+            char *name;
+            struct ASTNode *value;
             struct ASTNode *pattern;
             struct ASTNode **or_patterns;
             int or_pattern_count;
