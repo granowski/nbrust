@@ -1427,9 +1427,65 @@ if_match_expr:
             
             // Check for guard expression (if <expr>)
             ASTNode *guard_expr = NULL;
-            if (p->current.type == TOKEN_IF) {
+            if (p->current.type == TOKEN_IF_LET) {
+                consume(p, TOKEN_IF_LET);
+                char *pattern_name = strdup(p->current.text);
+                consume(p, TOKEN_IDENT);
+                
+                ASTNode *pattern = parse_pattern(p);
+                
+                // Check for guard expression (if <expr>)
+                ASTNode *guard_expr = NULL;
+                if (p->current.type == TOKEN_IF) {
+                    consume(p, TOKEN_IF);
+                    guard_expr = parse_expression(p);
+                }
+                
+                ASTNode *body;
+                if (p->current.type == TOKEN_LBRACE) {
+                    body = parse_block(p);
+                } else {
+                    body = parse_expression(p);
+                    if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
+                }
+                
+                ASTNode *arm = ast_new(AST_MATCH_ARM);
+                arm->data.match_arm.pattern = pattern;
+                arm->data.match_arm.body = body;
+                arm->data.match_arm.guard_expr = guard_expr;
+                arm->data.match_arm.or_patterns = or_patterns;
+                arm->data.match_arm.or_pattern_count = or_pattern_count;
+                arms[arm_count++] = arm;
+                if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
+                if (arm_count >= 20) {
+                    arms = realloc(arms, sizeof(ASTNode*) * (arm_count + 20));
+                }
+            } else if (p->current.type == TOKEN_IF) {
                 consume(p, TOKEN_IF);
-                guard_expr = parse_expression(p);
+                ASTNode *guard_expr = NULL;
+                if (p->current.type == TOKEN_IF) {
+                    consume(p, TOKEN_IF);
+                    guard_expr = parse_expression(p);
+                }
+                
+                ASTNode *body;
+                if (p->current.type == TOKEN_LBRACE) {
+                    body = parse_block(p);
+                } else {
+                    body = parse_expression(p);
+                    if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
+                }
+                ASTNode *arm = ast_new(AST_MATCH_ARM);
+                arm->data.match_arm.pattern = pattern;
+                arm->data.match_arm.body = body;
+                arm->data.match_arm.guard_expr = guard_expr;
+                arm->data.match_arm.or_patterns = or_patterns;
+                arm->data.match_arm.or_pattern_count = or_pattern_count;
+                arms[arm_count++] = arm;
+                if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
+                if (arm_count >= 20) {
+                    arms = realloc(arms, sizeof(ASTNode*) * (arm_count + 20));
+                }
             }
             
             ASTNode *body;
@@ -1439,6 +1495,7 @@ if_match_expr:
                 body = parse_expression(p);
                 if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
             }
+
             ASTNode *arm = ast_new(AST_MATCH_ARM);
             arm->data.match_arm.pattern = pattern;
             arm->data.match_arm.body = body;

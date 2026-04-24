@@ -40,6 +40,7 @@ typedef enum {
     TOKEN_DOT_DOT_EQ, // ..=
     TOKEN_STRING,   // "string"
     TOKEN_IF,       // if
+    TOKEN_IF_LET,   // if let
     TOKEN_ELSE,     // else
     TOKEN_WHILE,    // while
     TOKEN_LOOP,     // loop
