@@ -1394,7 +1394,19 @@ void codegen_emit_type_body(ASTNode *node, FILE *out) {
         fprintf(out, "    } data;\n");
         fprintf(out, "};\n\n");
         fprintf(out, "static struct %s %s_new() { struct %s res; memset(&res, 0, sizeof(res)); return res; }\n", node->data.enum_decl.name, node->data.enum_decl.name, node->data.enum_decl.name);
+        
+        // Generate constructors for all variants
         for (int i = 0; i < node->data.enum_decl.variant_count; i++) {
+            ASTNode *variant = node->data.enum_decl.variants[i];
+            fprintf(out, "static struct %s %s_%s() { struct %s res; res.tag = TAG_%s_%s; return res; }\n",
+                node->data.enum_decl.name, 
+                node->data.enum_decl.name, 
+                variant->data.enum_variant.name,
+                node->data.enum_decl.name,
+                node->data.enum_decl.name,
+                variant->data.enum_variant.name);
+        }
+/*         for (int i = 0; i < node->data.enum_decl.variant_count; i++) {
             ASTNode *variant = node->data.enum_decl.variants[i];
             if (variant->data.enum_variant.variant_type == AST_CALL) {
                 fprintf(out, "static struct %s %s_%s(", node->data.enum_decl.name, node->data.enum_decl.name, variant->data.enum_variant.name);
@@ -1408,7 +1420,7 @@ void codegen_emit_type_body(ASTNode *node, FILE *out) {
                 }
                 fprintf(out, "return res; }\n");
             }
-        }
+        } */
     }
 }
 
