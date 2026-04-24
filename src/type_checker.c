@@ -458,7 +458,7 @@ static Type *check_node(ASTNode *node) {
             }
             result = t;
             // Robustly set specialized name for generics
-            char *type_str = type_to_string(t);
+            char *type_str = (char *)type_to_string(t);
             if (t->kind == TYPE_STRUCT && strstr(type_str, "<")) {
                  char *lt = strchr(type_str, '<');
                  char *gt = strrchr(type_str, '>');

@@ -2,6 +2,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+static char *parse_type(Parser *p);
+ASTNode *parse_expression(Parser *p);
+static ASTNode *parse_expression_no_struct(Parser *p);
+static ASTNode *parse_postfix(Parser *p, int allow_struct_init);
+static ASTNode *parse_unary(Parser *p, int allow_struct_init);
+static ASTNode *parse_expression_precedence(Parser *p, int min_precedence, int allow_struct_init);
+static ASTNode *parse_primary(Parser *p, int allow_struct_init);
+static ASTNode *parse_pattern(Parser *p);
+
 static char *safe_strdup(const char *s) {
     return s ? strdup(s) : NULL;
 }
@@ -708,15 +717,6 @@ void parser_init(Parser *p, Lexer *l) {
 #undef ast_new
 #define ast_new(type) ast_new_at(type, p->current.line, p->current.col)
 
-static char *parse_type(Parser *p);
-ASTNode *parse_expression(Parser *p);
-static ASTNode *parse_expression_no_struct(Parser *p);
-static ASTNode *parse_postfix(Parser *p, int allow_struct_init);
-static ASTNode *parse_unary(Parser *p, int allow_struct_init);
-static ASTNode *parse_expression_precedence(Parser *p, int min_precedence, int allow_struct_init);
-static ASTNode *parse_primary(Parser *p, int allow_struct_init);
-static ASTNode *parse_pattern(Parser *p);
-
 // Generic parsing helpers
 static void parse_generic_params_with_bounds(Parser *p, char ***names, ASTNode ****bounds, int **bounds_counts, int *count) {
     if (p->current.type != TOKEN_LT) return;
@@ -820,7 +820,7 @@ static char *parse_type(Parser *p) {
         if (strcmp(inner, "char") == 0) {
             sprintf(buf, "const char*");
         } else {
-            sprintf(buf, "%s%s*", buf, inner);
+            snprintf(buf, sizeof(buf), sizeof(buf), "%s%s*", buf, inner);
         }
         free(inner);
     } else if (p->current.type == TOKEN_AMP) {
@@ -938,159 +938,6 @@ static char *parse_type(Parser *p) {
     }
     return strdup(buf);
 }
-/* 
-static ASTNode *parse_pattern(Parser *p) {
-    // Inside parse_pattern, before the main parsing logic:
-    ASTNode *node = NULL;
-    // Initialize OR-pattern storage
-    // todo -> If we're not actually parsing a match arm,
-    //         we shouldn't need this. We can optimize later
-    //         by only initializing this when we know we're in a match arm.
-    node->data.match_arm.or_patterns = malloc(sizeof(ASTNode*) * 20); // Assuming 20 is enough capacity
-    node->data.match_arm.or_pattern_count = 0;
-
-    // Handle tuple patterns (a, b)
-    if (p->current.type == TOKEN_LPAREN) {
-        consume(p, TOKEN_LPAREN);
-        ASTNode **args = malloc(sizeof(ASTNode*) * 10);
-        int arg_count = 0;
-        while (p->current.type != TOKEN_RPAREN && p->current.type != TOKEN_EOF) {
-            args[arg_count++] = parse_pattern(p);
-            if (p->current.type == TOKEN_COMMA) {
-                consume(p, TOKEN_COMMA);
-            }
-        }
-        consume(p, TOKEN_RPAREN);
-        ASTNode *node = ast_new(AST_TUPLE);
-        node->data.tuple.elements = args;
-        node->data.tuple.count = arg_count;
-        return node;
-    }
-    
-    if (p->current.type == TOKEN_UNDERSCORE) {
-        ASTNode *node = ast_new(AST_IDENT);
-        node->data.ident.name = strdup("_");
-        consume(p, TOKEN_UNDERSCORE);
-        return node;
-    }
-    
-    if (p->current.type == TOKEN_INT) {
-        ASTNode *node = ast_new(AST_LITERAL);
-        node->data.literal.value = strdup(p->current.text);
-        consume(p, TOKEN_INT);
-        
-        // Check for range pattern (e.g., 1..10 or 1..=10)
-        if (p->current.type == TOKEN_DOT_DOT || p->current.type == TOKEN_DOT_DOT_EQ) {
-            TokenType range_type = p->current.type;
-            consume(p, range_type);
-            ASTNode *end = ast_new(AST_LITERAL);
-            if (p->current.type == TOKEN_INT) {
-                end->data.literal.value = strdup(p->current.text);
-                consume(p, TOKEN_INT);
-            } else {
-                // Invalid range end
-                return node;
-            }
-            // For now, store range info in the pattern node itself
-            // This is a simplification - ideally we'd have a dedicated AST_RANGE_PATTERN
-            node->data.literal.value2 = end->data.literal.value; // Store end as secondary value
-            node->data.literal.is_range = (range_type == TOKEN_DOT_DOT_EQ) ? 2 : 1; // 1 = inclusive, 2 = exclusive
-            free(end);
-        }
-        return node;
-    }
-
-    if (p->current.type == TOKEN_STRING) {
-        ASTNode *node = ast_new(AST_STRING_LITERAL);
-        node->data.string_literal.value = strdup(p->current.text);
-        consume(p, TOKEN_STRING);
-        return node;
-    }
-
-    if (p->current.type != TOKEN_IDENT) {
-        return NULL;
-    }
-    
-    char *name = strdup(p->current.text);
-    consume(p, TOKEN_IDENT);
-    
-    while (p->current.type == TOKEN_COLON_COLON) {
-        consume(p, TOKEN_COLON_COLON);
-        if (p->current.type == TOKEN_IDENT) {
-            char *member = strdup(p->current.text);
-            consume(p, TOKEN_IDENT);
-            char *fullname = malloc(strlen(name) + 2 + strlen(member) + 1);
-            sprintf(fullname, "%s_%s", name, member);
-            free(name);
-            free(member);
-            name = fullname;
-        } else {
-            break;
-        }
-    }
-    
-    if (p->current.type == TOKEN_LPAREN) {
-        consume(p, TOKEN_LPAREN);
-        int capacity = 10;
-        ASTNode **args = malloc(sizeof(ASTNode*) * capacity);
-        int arg_count = 0;
-        while (p->current.type != TOKEN_RPAREN && p->current.type != TOKEN_EOF) {
-            if (arg_count >= capacity) {
-                capacity *= 2;
-                args = realloc(args, sizeof(ASTNode*) * capacity);
-            }
-            args[arg_count++] = parse_pattern(p);
-            if (p->current.type == TOKEN_COMMA) {
-                consume(p, TOKEN_COMMA);
-            }
-        }
-        consume(p, TOKEN_RPAREN);
-        ASTNode *node = ast_new(AST_CALL);
-        node->data.call.name = name;
-        node->data.call.args = args;
-        node->data.call.arg_count = arg_count;
-        return node;
-    } else if (p->current.type == TOKEN_LBRACE) {
-        consume(p, TOKEN_LBRACE);
-        int capacity = 10;
-        ASTNode **fields = malloc(sizeof(ASTNode*) * capacity);
-        int field_count = 0;
-        while (p->current.type != TOKEN_RBRACE && p->current.type != TOKEN_EOF) {
-            if (field_count >= capacity) {
-                capacity *= 2;
-                fields = realloc(fields, sizeof(ASTNode*) * capacity);
-            }
-            char *fname = strdup(p->current.text);
-            consume(p, TOKEN_IDENT);
-            ASTNode *val_pattern = NULL;
-            if (p->current.type == TOKEN_COLON) {
-                consume(p, TOKEN_COLON);
-                val_pattern = parse_pattern(p);
-            } else {
-                // Shorthand: field name is also the binder
-                val_pattern = ast_new(AST_IDENT);
-                val_pattern->data.ident.name = strdup(fname);
-            }
-            ASTNode *field_init = ast_new(AST_FIELD_INIT);
-            field_init->data.field_init.name = fname;
-            field_init->data.field_init.value = val_pattern;
-            fields[field_count++] = field_init;
-            if (p->current.type == TOKEN_COMMA) {
-                consume(p, TOKEN_COMMA);
-            }
-        }
-        consume(p, TOKEN_RBRACE);
-        ASTNode *node = ast_new(AST_STRUCT_INIT);
-        node->data.struct_init.struct_name = name;
-        node->data.struct_init.fields = fields;
-        node->data.struct_init.field_count = field_count;
-        return node;
-    }
-    
-    ASTNode *node = ast_new(AST_IDENT);
-    node->data.ident.name = name;
-    return node;
-} */
 
 static ASTNode *parse_pattern(Parser *p) {
     // The pattern parsing logic is refactored into a loop to handle 'pattern1 | pattern2 | pattern3'.
@@ -1121,7 +968,6 @@ static ASTNode *parse_pattern(Parser *p) {
     
     return node;
 }
-
 
 static ASTNode *parse_single_pattern_internal(Parser *p) {
         // Handle tuple patterns (a, b)
@@ -1235,18 +1081,18 @@ static ASTNode *parse_single_pattern_internal(Parser *p) {
             }
             char *fname = strdup(p->current.text);
             consume(p, TOKEN_IDENT);
-            ASTNode *val_pattern = NULL;
+            ASTNode *value = NULL;
             if (p->current.type == TOKEN_COLON) {
                 consume(p, TOKEN_COLON);
-                val_pattern = parse_pattern(p);
+                value = parse_pattern(p);
             } else {
                 // Shorthand: field name is also the binder
-                val_pattern = ast_new(AST_IDENT);
-                val_pattern->data.ident.name = strdup(fname);
+                value = ast_new(AST_IDENT);
+                value->data.ident.name = strdup(fname);
             }
             ASTNode *field_init = ast_new(AST_FIELD_INIT);
             field_init->data.field_init.name = fname;
-            field_init->data.field_init.value = val_pattern;
+            field_init->data.field_init.value = value;
             fields[field_count++] = field_init;
             if (p->current.type == TOKEN_COMMA) {
                 consume(p, TOKEN_COMMA);
