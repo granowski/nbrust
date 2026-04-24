@@ -40,7 +40,8 @@ typedef enum {
     AST_TYPE_ALIAS,
     AST_CONST,
     AST_TRAIT_IMPL,
-    AST_CAST
+    AST_CAST,
+    AST_PATTERN
 } ASTNodeType;
 
 typedef struct ASTNode {
@@ -261,6 +262,11 @@ typedef struct ASTNode {
             struct ASTNode *expr;
             char *type_name;
         } cast;
+        struct {
+            struct ASTNode *pattern;
+            struct ASTNode **or_patterns;
+            int or_pattern_count;
+        } pattern;
     } data;
 } ASTNode;
 

@@ -74,6 +74,13 @@ typedef enum {
     TOKEN_LBRACKET,   // [
     TOKEN_RBRACKET,   // ]
     TOKEN_MOD_OP,     // %
+    TOKEN_PIPE,       // |
+    TOKEN_CARET,      // ^
+    TOKEN_TILDE,      // ~
+    TOKEN_QUESTION,   // ?
+    TOKEN_AT,         // @
+    TOKEN_BACKSLASH,   // \
+    TOKEN_HASH,       // #
     TOKEN_EOF,
     TOKEN_UNKNOWN
 } TokenType;
