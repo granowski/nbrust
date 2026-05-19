@@ -1,11 +1,11 @@
-
-CFLAGS += -Iinclude
-
 # OS detection
 UNAME_S := $(shell uname -s)
+
+CFLAGS += -Iinclude -Icargo -Wall -O2
+CC = cc
+
 ifeq ($(UNAME_S),NetBSD)
     CFLAGS += -DNETBSD
-    CC = cc
 endif
 ifeq ($(UNAME_S),Darwin)
     CFLAGS += -DAPPLE
@@ -16,52 +16,37 @@ ifeq ($(UNAME_S),Linux)
     CC = gcc
 endif
 
-# Common build settings
 OBJDIR = obj
 PROGS = nbrust nbcargo
 
 # Source files
-SRCS_NBRUST = \
-	src/main.c \
-	src/lexer.c \
-	src/parser.c \
-	src/codegen.c \
-	src/codegen_arm64.c \
-	src/codegen_armv6.c \
-	src/types.c \
-	src/symbol_table.c \
-	src/type_checker.c \
-	src/macro_expand.c \
-	src/borrow_checker.c \
-	src/monomorphization.c
+SRCS_NBRUST = $(wildcard src/*.c)
+OBJS_NBRUST = $(patsubst %.c, $(OBJDIR)/%.o, $(SRCS_NBRUST))
 
-SRCS_NBCARGO = \
-	cargo/main.c \
-	cargo/toml.c
+SRCS_NBCARGO = $(wildcard cargo/*.c)
+OBJS_NBCARGO = $(patsubst %.c, $(OBJDIR)/%.o, $(SRCS_NBCARGO))
 
 # Build rules
-all: ${PROGS}
+all: $(PROGS)
 
-nbrust: ${SRCS_NBRUST}
-	${CC} ${CFLAGS} -o nbrust ${SRCS_NBRUST}
+nbrust: $(OBJS_NBRUST)
+	$(CC) $(CFLAGS) -o $@ $^
 
-nbcargo: ${SRCS_NBCARGO}
-	${CC} ${CFLAGS} -o nbcargo ${SRCS_NBCARGO}
+nbcargo: $(OBJS_NBCARGO)
+	$(CC) $(CFLAGS) -o $@ $^
 
-# Object file generation
-${OBJDIR}/%.o: %.c
-	mkdir -p ${OBJDIR}
-	${CC} ${CFLAGS} -c $< -o $@
+$(OBJDIR)/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
 
-# Clean target
 clean:
-	rm -rf ${OBJDIR} ${PROGS}
-	rm -f src/*.o cargo/*.o
+	rm -rf $(OBJDIR) $(PROGS)
 	rm -rf tmp/
 
-# Test target (optional)
-test:
+test: all
 	@echo "Testing nbrust..."
 	./nbrust --help
 	@echo "Testing nbcargo..."
 	./nbcargo --help
+
+.PHONY: all clean test

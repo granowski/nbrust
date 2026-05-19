@@ -820,7 +820,9 @@ static char *parse_type(Parser *p) {
         if (strcmp(inner, "char") == 0) {
             sprintf(buf, "const char*");
         } else {
-            snprintf(buf, sizeof(buf), sizeof(buf), "%s%s*", buf, inner);
+            char temp[256];
+            snprintf(temp, sizeof(temp), "%s%s*", buf, inner);
+            strcpy(buf, temp);
         }
         free(inner);
     } else if (p->current.type == TOKEN_AMP) {

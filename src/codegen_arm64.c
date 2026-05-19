@@ -284,7 +284,7 @@ static void codegen_expr(ASTNode *node, FILE *out, Target target) {
             }
             fprintf(out, "    mov x0, x8\n");
             break;
-        case AST_MATCH_STMT:
+        case AST_MATCH_STMT: {
             // Define common fail label
             int l_fail = next_label();
             
@@ -338,6 +338,7 @@ static void codegen_expr(ASTNode *node, FILE *out, Target target) {
             // Common fail label
             fprintf(out, ".L%d:\n", l_fail);
             break;
+        }
         default:
             fprintf(out, "    // Unsupported ARM64 expression node type %d\n", node->type);
             break;
