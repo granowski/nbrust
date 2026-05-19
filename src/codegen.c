@@ -301,6 +301,13 @@ static void codegen_pattern_condition(ASTNode *pattern, const char *access_path,
                  fprintf(out, "1"); // Variable binding always matches
             }
         }
+    } else if (pattern->type == AST_PATTERN) {
+        fprintf(out, "(");
+        for (int i = 0; i < pattern->data.pattern.or_pattern_count; i++) {
+            if (i > 0) fprintf(out, " || ");
+            codegen_pattern_condition(pattern->data.pattern.or_patterns[i], access_path, match_expr, out);
+        }
+        fprintf(out, ")");
     } else if (pattern->type == AST_LITERAL || pattern->type == AST_BOOL_LITERAL || pattern->type == AST_STRING_LITERAL) {
         fprintf(out, "(%s == ", access_path);
         codegen_node_ext(pattern, out, 1);
@@ -338,6 +345,10 @@ static void codegen_pattern_bindings(ASTNode *pattern, const char *access_path, 
             if (!isupper(pattern->data.ident.name[0]) && !strstr(pattern->data.ident.name, "::")) {
                 fprintf(out, "            auto %s = %s;\n", pattern->data.ident.name, access_path);
             }
+        }
+    } else if (pattern->type == AST_PATTERN) {
+        if (pattern->data.pattern.or_pattern_count > 0) {
+            codegen_pattern_bindings(pattern->data.pattern.or_patterns[0], access_path, match_expr, out);
         }
     } else if (pattern->type == AST_CALL) {
         char *vname = pattern->data.call.name;

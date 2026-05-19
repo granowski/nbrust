@@ -397,10 +397,11 @@ ASTNode *ast_clone(ASTNode *node) {
             new_node->data.cast.type_name = safe_strdup(node->data.cast.type_name);
             break;
         case AST_PATTERN:
-            new_node->data.match_arm.or_patterns = malloc(sizeof(ASTNode*) * 20);
-            new_node->data.match_arm.or_pattern_count = 0;
-            // Note: We assume the pattern node itself doesn't hold complex data that needs cloning
-            // beyond what is already handled by the OR-pattern array.
+            new_node->data.pattern.or_patterns = malloc(sizeof(ASTNode*) * node->data.pattern.or_pattern_count);
+            new_node->data.pattern.or_pattern_count = node->data.pattern.or_pattern_count;
+            for (int i = 0; i < node->data.pattern.or_pattern_count; i++) {
+                new_node->data.pattern.or_patterns[i] = ast_clone(node->data.pattern.or_patterns[i]);
+            }
             break;
     }
     return new_node;
@@ -699,10 +700,10 @@ void ast_free(ASTNode *node) {
             free(node->data.cast.type_name);
             break;
         case AST_PATTERN:
-            for (int i = 0; i < node->data.match_arm.or_pattern_count; i++) {
-                ast_free(node->data.match_arm.or_patterns[i]);
+            for (int i = 0; i < node->data.pattern.or_pattern_count; i++) {
+                ast_free(node->data.pattern.or_patterns[i]);
             }
-            free(node->data.match_arm.or_patterns);
+            free(node->data.pattern.or_patterns);
             break;
     }
     free(node);
@@ -944,9 +945,8 @@ static char *parse_type(Parser *p) {
 static ASTNode *parse_pattern(Parser *p) {
     // The pattern parsing logic is refactored into a loop to handle 'pattern1 | pattern2 | pattern3'.
     
-    ASTNode *node = ast_new(AST_PATTERN); 
-    node->data.match_arm.or_patterns = malloc(sizeof(ASTNode*) * 20);
-    node->data.match_arm.or_pattern_count = 0;
+    ASTNode **or_patterns = malloc(sizeof(ASTNode*) * 20);
+    int or_pattern_count = 0;
 
     // Loop to parse patterns separated by '|'
     while (p->current.type != TOKEN_EOF) {
@@ -957,7 +957,7 @@ static ASTNode *parse_pattern(Parser *p) {
         }
         
         // Store the successfully parsed pattern
-        node->data.match_arm.or_patterns[node->data.match_arm.or_pattern_count++] = pattern;
+        or_patterns[or_pattern_count++] = pattern;
 
         // Check for separator
         if (p->current.type == TOKEN_PIPE) {
@@ -967,6 +967,16 @@ static ASTNode *parse_pattern(Parser *p) {
             break; // Not followed by '|', so this is the last pattern
         }
     }
+
+    if (or_pattern_count == 1) {
+        ASTNode *single = or_patterns[0];
+        free(or_patterns);
+        return single;
+    }
+    
+    ASTNode *node = ast_new(AST_PATTERN); 
+    node->data.pattern.or_patterns = or_patterns;
+    node->data.pattern.or_pattern_count = or_pattern_count;
     
     return node;
 }
