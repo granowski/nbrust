@@ -41,13 +41,20 @@ int main(int argc, char **argv) {
     if (argc < 2) {
         fprintf(
             stderr,
-            "Usage: %s <source.rs> [-L <lib_path>] [-o <output>] [-c] [--arch <x86|x86_64|armv6|aarch64>] [--os <macos|netbsd>] [--backend <c|arm64-asm|armv6-asm>]\n",
+            "Usage: %s <source.rs> [-L <lib_path>] [-o <output>] [-c] [--arch <x86|x86_64|armv6|aarch64>] [--os <macos|netbsd|linux>] [--backend <c|arm64-asm|armv6-asm>]\n",
             argv[0]);
         return 1;
     }
 
     char *source_path = NULL;
-    Target target = {ARCH_AARCH64, OS_NETBSD, BACKEND_C}; // Default target
+    // Detect host OS for default target
+    OS default_os = OS_NETBSD; // Default fallback
+#ifdef __linux__
+    default_os = OS_LINUX;
+#elif defined(__APPLE__) && defined(__MACH__)
+    default_os = OS_MACOS;
+#endif
+    Target target = {ARCH_AARCH64, default_os, BACKEND_C};
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-L") == 0 && i + 1 < argc) {
@@ -67,6 +74,7 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[i], "--os") == 0 && i + 1 < argc) {
             if (strcmp(argv[i + 1], "macos") == 0) target.os = OS_MACOS;
             else if (strcmp(argv[i + 1], "netbsd") == 0) target.os = OS_NETBSD;
+            else if (strcmp(argv[i + 1], "linux") == 0) target.os = OS_LINUX;
             i++;
         } else if (strcmp(argv[i], "--backend") == 0 && i + 1 < argc) {
             if (strcmp(argv[i + 1], "c") == 0) target.backend = BACKEND_C;
@@ -260,7 +268,8 @@ int main(int argc, char **argv) {
         if (!compile_only) {
             char cmd[2048];
             if (target.backend == BACKEND_C) {
-                snprintf(cmd, sizeof(cmd), "cc -std=c23 %s -o %s", tmp_source, output_filename);
+                const char *c_standard = (target.os == OS_MACOS || target.os == OS_NETBSD) ? "c23" : "c2x";
+                snprintf(cmd, sizeof(cmd), "cc -std=%s %s -o %s", c_standard, tmp_source, output_filename);
             } else if (target.backend == BACKEND_ARM64_ASM) {
                 if (target.os == OS_MACOS)
                     snprintf(cmd, sizeof(cmd),

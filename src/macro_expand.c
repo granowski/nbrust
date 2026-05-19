@@ -258,7 +258,7 @@ static ASTNode* apply_macro_expansion(MacroDefinition *m, ASTNode *call) {
                         }
                         
                         // Robust fix for println in templates
-                        fprintf(stderr, "DEBUG: Before println fix template: %s\n", template);
+//                        fprintf(stderr, "DEBUG: Before println fix template: %s\n", template);
                         char *println_ptr = strstr(template, "println");
                         if (println_ptr) {
                             char *new_template = malloc(16384);
@@ -300,7 +300,7 @@ static ASTNode* apply_macro_expansion(MacroDefinition *m, ASTNode *call) {
                             template = new_template;
                         }
 
-                        fprintf(stderr, "DEBUG: Final template for %s: %s\n", m->name, template);
+//                        fprintf(stderr, "DEBUG: Final template for %s: %s\n", m->name, template);
                         
                         Lexer lex;
                         lexer_init(&lex, template);
@@ -503,6 +503,6 @@ static void expand_node(ASTNode **node_ptr) {
 }
 
 void macro_expand_run(ASTNode *root) {
-    fprintf(stderr, "DEBUG: macro_expand_run started\n");
+//    fprintf(stderr, "DEBUG: macro_expand_run started\n");
     expand_node(&root);
 }

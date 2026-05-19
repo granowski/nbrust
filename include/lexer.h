@@ -13,6 +13,7 @@ typedef enum {
     TOKEN_RPAREN,   // )
     TOKEN_LBRACE,   // {
     TOKEN_RBRACE,   // }
+    TOKEN_RARROW,   // ->
     TOKEN_COLON,    // :
     TOKEN_COLON_COLON, // ::
     TOKEN_SEMICOLON,// ;
@@ -35,8 +36,11 @@ typedef enum {
     TOKEN_BAR_BAR,  // ||
     TOKEN_BAR,      // |
     TOKEN_DOT,      // .
+    TOKEN_DOT_DOT,  // ..
+    TOKEN_DOT_DOT_EQ, // ..=
     TOKEN_STRING,   // "string"
     TOKEN_IF,       // if
+    TOKEN_IF_LET,   // if let
     TOKEN_ELSE,     // else
     TOKEN_WHILE,    // while
     TOKEN_LOOP,     // loop
@@ -70,6 +74,13 @@ typedef enum {
     TOKEN_LBRACKET,   // [
     TOKEN_RBRACKET,   // ]
     TOKEN_MOD_OP,     // %
+    TOKEN_PIPE,       // |
+    TOKEN_CARET,      // ^
+    TOKEN_TILDE,      // ~
+    TOKEN_QUESTION,   // ?
+    TOKEN_AT,         // @
+    TOKEN_BACKSLASH,   // \
+    TOKEN_HASH,       // #
     TOKEN_EOF,
     TOKEN_UNKNOWN
 } TokenType;

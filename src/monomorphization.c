@@ -794,7 +794,6 @@ static void walk_and_specialize(ASTNode *node) {
             }
             break;
         case AST_STRUCT_INIT:
-            // debug_node("Before walk", node);
             if (node->data.struct_init.struct_name) {
                 ASTNode *generic = monomorphization_lookup(node->data.struct_init.struct_name);
                 if (generic && generic->type == AST_STRUCT_DECL && generic->data.struct_decl.generic_param_count > 0 && !strchr(node->data.struct_init.struct_name, '<')) {
@@ -903,7 +902,6 @@ static void walk_and_specialize(ASTNode *node) {
             walk_and_specialize(node->data.for_loop.body);
             break;
         case AST_METHOD_CALL: {
-            // debug_node("Before walk", node);
             walk_and_specialize(node->data.method_call.receiver);
             for (int i = 0; i < node->data.method_call.arg_count; i++) walk_and_specialize(node->data.method_call.args[i]);
             

@@ -1,5 +1,10 @@
 #!/bin/sh
 
+# Ensure directories exist
+rm -rf tmp/
+mkdir -p tmp/
+mkdir -p tmp/tests/
+
 # Colors for output
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -20,7 +25,7 @@ FAILED=0
 TOTAL=0
 
 # Temporary file for binary
-TMP_BIN="/tmp/test_bin"
+TMP_BIN=""
 
 echo "Running tests in $TEST_DIR..."
 echo "---------------------------------------"
@@ -43,10 +48,12 @@ for test_file in "$TEST_DIR"/*.rs; do
     TOTAL=$((TOTAL + 1))
     test_name=$(basename "$test_file")
     
+    TMP_BIN="tmp/${test_file%%.*}-test_bin"
+
     # Run nbrust and compile
     # We use -o to let nbrust handle the C compilation via cc
     # We capture stderr to check for borrow checker or other errors
-    $NBRUST "$test_file" -o "$TMP_BIN" > /tmp/nbrust_test.log 2>&1
+    $NBRUST "$test_file" -o "$TMP_BIN" > "tmp/${test_file%%.*}-nbrust_test.log" 2>&1
     RET=$?
     
     if [ $RET -eq 0 ]; then
@@ -71,7 +78,7 @@ for test_file in "$TEST_DIR"/*.rs; do
                 echo "${RED}[FAIL]${NC} $test_name (Execution failed with $RUN_RET)"
                 FAILED=$((FAILED + 1))
             fi
-            rm "$TMP_BIN"
+            #rm "$TMP_BIN"
         else
             # Compiled successfully but no binary (maybe -c was used or it's a lib)
             echo "${GREEN}[PASS]${NC} $test_name (Compiled only)"

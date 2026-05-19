@@ -15,6 +15,7 @@ typedef enum {
 typedef enum {
     OS_MACOS,
     OS_NETBSD,
+    OS_LINUX,
     OS_UNKNOWN
 } OS;
 

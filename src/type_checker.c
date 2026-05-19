@@ -41,7 +41,7 @@ static Type *check_node(ASTNode *node);
 
 static Type *check_node(ASTNode *node) {
     if (!node) return type_primitive(PRIM_VOID);
-    fprintf(stderr, "DEBUG: check_node type=%d at line %d\n", node->type, node->line);
+//    fprintf(stderr, "DEBUG: check_node type=%d at line %d\n", node->type, node->line);
     
     Type *result = type_primitive(PRIM_VOID);
     switch (node->type) {
@@ -92,21 +92,6 @@ static Type *check_node(ASTNode *node) {
                 while (t->parent) t = t->parent;
                 s = symbol_table_lookup(t, node->data.ident.name);
             }
-            if (s && s->type && s->type->kind == TYPE_ENUM) {
-                result = s->type;
-                node->resolved_type = result;
-                // Check if it's a unit variant like Option::None
-                if (strstr(node->data.ident.name, "::")) {
-                    char *copy = strdup(node->data.ident.name);
-                    char *sep = strstr(copy, "::");
-                    *sep = '\0';
-                    char *variant = sep + 2;
-                    // If it is indeed a variant of this enum, result is already the enum type
-                    // but we can mark it for codegen if needed.
-                    free(copy);
-                }
-                break;
-            }
             if (!s) {
                 result = type_new(TYPE_UNKNOWN);
             } else {
@@ -138,11 +123,10 @@ static Type *check_node(ASTNode *node) {
                     if (init_t) t = init_t;
                 }
 
-                // If t is Result<i32, &str> and init_t is Result_i32_Refchar, use the specialized type
-                if (t && init_t && (t->kind == TYPE_ENUM || t->kind == TYPE_STRUCT) && (init_t->kind == TYPE_STRUCT || init_t->kind == TYPE_ENUM)) {
+                // If t is Result<i32, &str> and init_t is Result_int_Refchar, use the specialized type
+                if (t && init_t && (t->kind == TYPE_ENUM || t->kind == TYPE_STRUCT) && init_t->kind == TYPE_STRUCT) {
                     const char *target_name = (t->kind == TYPE_ENUM) ? t->data.enum_type.name : t->data.struct_type.name;
-                    const char *init_name = (init_t->kind == TYPE_ENUM) ? init_t->data.enum_type.name : init_t->data.struct_type.name;
-                    if (target_name && init_name && strstr(init_name, target_name)) {
+                    if (target_name && strstr(init_t->data.struct_type.name, target_name)) {
                         t = init_t;
                     }
                 }
@@ -277,52 +261,16 @@ static Type *check_node(ASTNode *node) {
             break;
         }
         case AST_FOR_STMT: {
-            Type *iterable_t = check_node(node->data.for_loop.iterable);
-            node->data.for_loop.iterable->resolved_type = iterable_t;
-            
-            // Try to determine the element type of the iterable
-            Type *element_t = NULL;
-            if (iterable_t && iterable_t->kind == TYPE_STRUCT) {
-                // Heuristic: Check if the struct has a next() method or is a Vec
-                if (strncmp(iterable_t->data.struct_type.name, "Vec_", 4) == 0) {
-                    element_t = parse_type_string(iterable_t->data.struct_type.name + 4);
-                } else if (strncmp(iterable_t->data.struct_type.name, "VecIter_", 8) == 0) {
-                    element_t = parse_type_string(iterable_t->data.struct_type.name + 8);
-                } else {
-                    // Look up the struct symbol to get its scope
-                    Symbol *struct_sym = symbol_table_lookup_path(current_table, iterable_t->data.struct_type.name);
-                    if (struct_sym && struct_sym->scope) {
-                        // Look for next() method in the struct's scope
-                        Symbol *s = symbol_table_lookup(struct_sym->scope, "next");
-                        if (s && s->type && s->type->kind == TYPE_FUNCTION) {
-                            Type *ret_t = s->type->data.function.return_type;
-                            if (ret_t && ret_t->kind == TYPE_ENUM && strncmp(ret_t->data.enum_type.name, "Option_", 7) == 0) {
-                                element_t = parse_type_string(ret_t->data.enum_type.name + 7);
-                            }
-                        }
-                    }
-                }
-            }
-            if (!element_t) element_t = type_primitive(PRIM_I32); // Default fallback
-            
-            SymbolTable *old_table = current_table;
-            current_table = symbol_table_new(old_table, "for_body");
-            current_table->is_block = 1;
-            node->scope = current_table;
-            
-            symbol_table_insert(current_table, node->data.for_loop.var_name, element_t);
-            
+            // For now, assume it's valid if iterable is checked
+            check_node(node->data.for_loop.iterable);
+            // Ideally add var_name to a new scope
             check_node(node->data.for_loop.body);
-            
-            current_table = old_table;
             result = type_primitive(PRIM_VOID);
             break;
         }
         case AST_MATCH: {
-            Type *expr_t = check_node(node->data.match_stmt.expr);
-            if (node->data.match_stmt.expr->type == AST_IDENT) {
-                node->data.match_stmt.expr->resolved_type = expr_t;
-            }
+            // check_node(node->data.match_stmt.expr);
+            check_node(node->data.match_stmt.expr);
             Type *arm_t = type_primitive(PRIM_VOID);
             for (int i = 0; i < node->data.match_stmt.arm_count; i++) {
                 ASTNode *arm = node->data.match_stmt.arms[i];
@@ -357,15 +305,6 @@ static Type *check_node(ASTNode *node) {
                      if (ss && ss->scope) {
                           s = symbol_table_lookup(ss->scope, underscore + 1);
                      }
-                     if (!s) {
-                          // Try global search for struct
-                          SymbolTable *t = current_table;
-                          while (t->parent) t = t->parent;
-                          ss = symbol_table_lookup(t, copy);
-                          if (ss && ss->scope) {
-                               s = symbol_table_lookup(ss->scope, underscore + 1);
-                          }
-                     }
                      free(copy);
                 }
                 free(alt_name);
@@ -378,18 +317,6 @@ static Type *check_node(ASTNode *node) {
             } else if (!s || !s->type || s->type->kind != TYPE_FUNCTION) {
                 // Heuristic for built-in or unknown functions
                 result = type_primitive(PRIM_I32);
-                
-                // Special case for Option::None and similar
-                if (strstr(name, "::")) {
-                    char *name_copy = strdup(name);
-                    char *last_sep = strstr(name_copy, "::");
-                    *last_sep = '\0';
-                    Symbol *ss = symbol_table_lookup_path(current_table, name_copy);
-                    if (ss && ss->type && ss->type->kind == TYPE_ENUM) {
-                        result = ss->type;
-                    }
-                    free(name_copy);
-                }
             } else {
                 result = s->type->data.function.return_type;
                 // If it's a static method call Point::new or Point_new, the result should be Point
@@ -435,7 +362,7 @@ static Type *check_node(ASTNode *node) {
             // Ensure receiver IDENT has the same type
             if (node->data.method_call.receiver->type == AST_IDENT) {
                 node->data.method_call.receiver->resolved_type = receiver_t;
-                fprintf(stderr, "DEBUG: METHOD_CALL receiver '%s' resolved to kind %d\n", node->data.method_call.receiver->data.ident.name, receiver_t->kind);
+//                fprintf(stderr, "DEBUG: METHOD_CALL receiver '%s' resolved to kind %d\n", node->data.method_call.receiver->data.ident.name, receiver_t->kind);
             }
             Type *inner_t = receiver_t;
             if (receiver_t->kind == TYPE_REFERENCE) inner_t = receiver_t->data.reference.inner;
@@ -461,7 +388,38 @@ static Type *check_node(ASTNode *node) {
             break;
         }
         case AST_MATCH_ARM: {
-            // Pattern should be checked too, but for now just body
+            // Check guard expression (must be bool)
+            if (node->data.match_arm.guard_expr) {
+                Type *guard_t = check_node(node->data.match_arm.guard_expr);
+                if (!type_equals(guard_t, type_primitive(PRIM_BOOL))) {
+                    fprintf(stderr, "Type error: Guard expression must be a boolean (got %s)\n",
+                            type_to_string(guard_t));
+                }
+            }
+
+            // Check range pattern (must be comparable types)
+            if (node->data.match_arm.range_start && node->data.match_arm.range_end) {
+                Type *start_t = check_node(node->data.match_arm.range_start);
+                Type *end_t = check_node(node->data.match_arm.range_end);
+                if (!type_equals(start_t, end_t)) {
+                    fprintf(stderr, "Type error: Range bounds must have compatible types (%s vs %s)\n",
+                            type_to_string(start_t), type_to_string(end_t));
+                }
+            }
+
+            // Check or-patterns (all must have same type)
+            if (node->data.match_arm.or_patterns && node->data.match_arm.or_pattern_count > 0) {
+                Type *first_t = check_node(node->data.match_arm.or_patterns[0]);
+                for (int i = 1; i < node->data.match_arm.or_pattern_count; i++) {
+                    Type *t = check_node(node->data.match_arm.or_patterns[i]);
+                    if (!type_equals(first_t, t)) {
+                        fprintf(stderr, "Type error: Or-patterns must have compatible types (%s vs %s)\n",
+                                type_to_string(first_t), type_to_string(t));
+                    }
+                }
+            }
+
+            // Check body expression
             result = check_node(node->data.match_arm.body);
             break;
         }
@@ -500,7 +458,7 @@ static Type *check_node(ASTNode *node) {
             }
             result = t;
             // Robustly set specialized name for generics
-            char *type_str = type_to_string(t);
+            char *type_str = (char *)type_to_string(t);
             if (t->kind == TYPE_STRUCT && strstr(type_str, "<")) {
                  char *lt = strchr(type_str, '<');
                  char *gt = strrchr(type_str, '>');

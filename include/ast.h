@@ -22,11 +22,13 @@ typedef enum {
     AST_METHOD_CALL,
     AST_MACRO_CALL,
     AST_STRING_LITERAL,
+    AST_TUPLE,
     AST_UNOP,
     AST_ENUM_DECL,
     AST_ENUM_VARIANT,
     AST_MATCH,
     AST_MATCH_ARM,
+    AST_MATCH_STMT,
     AST_TRAIT,
     AST_FOR_STMT,
     AST_GENERIC_TYPE,
@@ -38,7 +40,8 @@ typedef enum {
     AST_TYPE_ALIAS,
     AST_CONST,
     AST_TRAIT_IMPL,
-    AST_CAST
+    AST_CAST,
+    AST_PATTERN
 } ASTNodeType;
 
 typedef struct ASTNode {
@@ -75,6 +78,8 @@ typedef struct ASTNode {
         } var_decl;
         struct {
             char *value;
+            char *value2; // For range patterns: end of range
+            int is_range; // 1 = .. (inclusive), 2 = ..= (inclusive end)
         } literal;
         struct {
             char *name;
@@ -156,6 +161,10 @@ typedef struct ASTNode {
             char *value;
         } string_literal;
         struct {
+            struct ASTNode **elements;
+            int count;
+        } tuple;
+        struct {
             char *op;
             struct ASTNode *expr;
         } unop;
@@ -179,14 +188,19 @@ typedef struct ASTNode {
             int field_count;
         } enum_variant;
         struct {
+            struct ASTNode *pattern;
+            struct ASTNode *body;
+            struct ASTNode *guard_expr;
+            struct ASTNode *range_start;
+            struct ASTNode *range_end;
+            struct ASTNode **or_patterns;
+            int or_pattern_count;
+        } match_arm;
+        struct {
             struct ASTNode *expr;
             struct ASTNode **arms;
             int arm_count;
         } match_stmt;
-        struct {
-            struct ASTNode *pattern;
-            struct ASTNode *body;
-        } match_arm;
         struct {
             char *name;
             struct ASTNode **methods;
@@ -248,6 +262,13 @@ typedef struct ASTNode {
             struct ASTNode *expr;
             char *type_name;
         } cast;
+        struct {
+            char *name;
+            struct ASTNode *value;
+            struct ASTNode *pattern;
+            struct ASTNode **or_patterns;
+            int or_pattern_count;
+        } pattern;
     } data;
 } ASTNode;
 

@@ -2,6 +2,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+static char *parse_type(Parser *p);
+ASTNode *parse_expression(Parser *p);
+static ASTNode *parse_expression_no_struct(Parser *p);
+static ASTNode *parse_postfix(Parser *p, int allow_struct_init);
+static ASTNode *parse_unary(Parser *p, int allow_struct_init);
+static ASTNode *parse_expression_precedence(Parser *p, int min_precedence, int allow_struct_init);
+static ASTNode *parse_primary(Parser *p, int allow_struct_init);
+static ASTNode *parse_pattern(Parser *p);
+
 static char *safe_strdup(const char *s) {
     return s ? strdup(s) : NULL;
 }
@@ -129,7 +138,7 @@ ASTNode *ast_clone(ASTNode *node) {
                 for (int i = 0; i < node->data.struct_decl.generic_param_count; i++) {
                     new_node->data.struct_decl.generic_params[i] = safe_strdup(node->data.struct_decl.generic_params[i]);
                     new_node->data.struct_decl.generic_bounds_counts[i] = node->data.struct_decl.generic_bounds_counts[i];
-                    if (node->data.struct_decl.generic_bounds[i] && node->data.struct_decl.generic_bounds_counts[i] > 0) {
+                    if (node->data.struct_decl.generic_bounds[i]) {
                         new_node->data.struct_decl.generic_bounds[i] = malloc(sizeof(ASTNode*) * node->data.struct_decl.generic_bounds_counts[i]);
                         for (int j = 0; j < node->data.struct_decl.generic_bounds_counts[i]; j++) {
                             new_node->data.struct_decl.generic_bounds[i][j] = ast_clone(node->data.struct_decl.generic_bounds[i][j]);
@@ -205,6 +214,15 @@ ASTNode *ast_clone(ASTNode *node) {
         case AST_STRING_LITERAL:
             new_node->data.string_literal.value = safe_strdup(node->data.string_literal.value);
             break;
+        case AST_TUPLE:
+            new_node->data.tuple.count = node->data.tuple.count;
+            if (node->data.tuple.elements) {
+                new_node->data.tuple.elements = malloc(sizeof(ASTNode*) * node->data.tuple.count);
+                for (int i = 0; i < node->data.tuple.count; i++) {
+                    new_node->data.tuple.elements[i] = ast_clone(node->data.tuple.elements[i]);
+                }
+            }
+            break;
         case AST_BOOL_LITERAL:
             new_node->data.bool_literal.value = node->data.bool_literal.value;
             break;
@@ -273,6 +291,15 @@ ASTNode *ast_clone(ASTNode *node) {
         case AST_MATCH_ARM:
             new_node->data.match_arm.pattern = ast_clone(node->data.match_arm.pattern);
             new_node->data.match_arm.body = ast_clone(node->data.match_arm.body);
+            new_node->data.match_arm.guard_expr = ast_clone(node->data.match_arm.guard_expr);
+            new_node->data.match_arm.range_start = ast_clone(node->data.match_arm.range_start);
+            new_node->data.match_arm.range_end = ast_clone(node->data.match_arm.range_end);
+            if (node->data.match_arm.or_patterns) {
+                new_node->data.match_arm.or_patterns = malloc(sizeof(ASTNode*) * node->data.match_arm.or_pattern_count);
+                for (int i = 0; i < node->data.match_arm.or_pattern_count; i++) {
+                    new_node->data.match_arm.or_patterns[i] = ast_clone(node->data.match_arm.or_patterns[i]);
+                }
+            }
             break;
         case AST_TRAIT:
             new_node->data.trait_decl.name = safe_strdup(node->data.trait_decl.name);
@@ -368,6 +395,12 @@ ASTNode *ast_clone(ASTNode *node) {
         case AST_CAST:
             new_node->data.cast.expr = ast_clone(node->data.cast.expr);
             new_node->data.cast.type_name = safe_strdup(node->data.cast.type_name);
+            break;
+        case AST_PATTERN:
+            new_node->data.match_arm.or_patterns = malloc(sizeof(ASTNode*) * 20);
+            new_node->data.match_arm.or_pattern_count = 0;
+            // Note: We assume the pattern node itself doesn't hold complex data that needs cloning
+            // beyond what is already handled by the OR-pattern array.
             break;
     }
     return new_node;
@@ -665,6 +698,12 @@ void ast_free(ASTNode *node) {
             ast_free(node->data.cast.expr);
             free(node->data.cast.type_name);
             break;
+        case AST_PATTERN:
+            for (int i = 0; i < node->data.match_arm.or_pattern_count; i++) {
+                ast_free(node->data.match_arm.or_patterns[i]);
+            }
+            free(node->data.match_arm.or_patterns);
+            break;
     }
     free(node);
 }
@@ -677,15 +716,6 @@ void parser_init(Parser *p, Lexer *l) {
 
 #undef ast_new
 #define ast_new(type) ast_new_at(type, p->current.line, p->current.col)
-
-static char *parse_type(Parser *p);
-ASTNode *parse_expression(Parser *p);
-static ASTNode *parse_expression_no_struct(Parser *p);
-static ASTNode *parse_postfix(Parser *p, int allow_struct_init);
-static ASTNode *parse_unary(Parser *p, int allow_struct_init);
-static ASTNode *parse_expression_precedence(Parser *p, int min_precedence, int allow_struct_init);
-static ASTNode *parse_primary(Parser *p, int allow_struct_init);
-static ASTNode *parse_pattern(Parser *p);
 
 // Generic parsing helpers
 static void parse_generic_params_with_bounds(Parser *p, char ***names, ASTNode ****bounds, int **bounds_counts, int *count) {
@@ -790,7 +820,7 @@ static char *parse_type(Parser *p) {
         if (strcmp(inner, "char") == 0) {
             sprintf(buf, "const char*");
         } else {
-            sprintf(buf, "%s%s*", buf, inner);
+            snprintf(buf, sizeof(buf), sizeof(buf), "%s%s*", buf, inner);
         }
         free(inner);
     } else if (p->current.type == TOKEN_AMP) {
@@ -910,6 +940,54 @@ static char *parse_type(Parser *p) {
 }
 
 static ASTNode *parse_pattern(Parser *p) {
+    // The pattern parsing logic is refactored into a loop to handle 'pattern1 | pattern2 | pattern3'.
+    
+    ASTNode *node = ast_new(AST_PATTERN); 
+    node->data.match_arm.or_patterns = malloc(sizeof(ASTNode*) * 20);
+    node->data.match_arm.or_pattern_count = 0;
+
+    // Loop to parse patterns separated by '|'
+    while (p->current.type != TOKEN_EOF) {
+        ASTNode *pattern = parse_single_pattern_internal(p);
+        if (!pattern) {
+            // Failed to parse pattern, stop OR-list parsing
+            break;
+        }
+        
+        // Store the successfully parsed pattern
+        node->data.match_arm.or_patterns[node->data.match_arm.or_pattern_count++] = pattern;
+
+        // Check for separator
+        if (p->current.type == TOKEN_PIPE) {
+            consume(p, TOKEN_PIPE); // Consume '|'
+            // Continue to parse the next pattern
+        } else {
+            break; // Not followed by '|', so this is the last pattern
+        }
+    }
+    
+    return node;
+}
+
+static ASTNode *parse_single_pattern_internal(Parser *p) {
+        // Handle tuple patterns (a, b)
+    if (p->current.type == TOKEN_LPAREN) {
+        consume(p, TOKEN_LPAREN);
+        ASTNode **args = malloc(sizeof(ASTNode*) * 10);
+        int arg_count = 0;
+        while (p->current.type != TOKEN_RPAREN && p->current.type != TOKEN_EOF) {
+            args[arg_count++] = parse_pattern(p); // Recursive call
+            if (p->current.type == TOKEN_COMMA) {
+                consume(p, TOKEN_COMMA);
+            }
+        }
+        consume(p, TOKEN_RPAREN);
+        ASTNode *node = ast_new(AST_TUPLE);
+        node->data.tuple.elements = args;
+        node->data.tuple.count = arg_count;
+        return node;
+    }
+    
     if (p->current.type == TOKEN_UNDERSCORE) {
         ASTNode *node = ast_new(AST_IDENT);
         node->data.ident.name = strdup("_");
@@ -921,6 +999,23 @@ static ASTNode *parse_pattern(Parser *p) {
         ASTNode *node = ast_new(AST_LITERAL);
         node->data.literal.value = strdup(p->current.text);
         consume(p, TOKEN_INT);
+        
+        // Check for range pattern (e.g., 1..10 or 1..=10)
+        if (p->current.type == TOKEN_DOT_DOT || p->current.type == TOKEN_DOT_DOT_EQ) {
+            TokenType range_type = p->current.type;
+            consume(p, range_type);
+            ASTNode *end = ast_new(AST_LITERAL);
+            if (p->current.type == TOKEN_INT) {
+                end->data.literal.value = strdup(p->current.text);
+                consume(p, TOKEN_INT);
+            } else {
+                return NULL; // Invalid range end
+            }
+            // For now, store range info in the pattern node itself
+            node->data.literal.value2 = end->data.literal.value; // Store end as secondary value
+            node->data.literal.is_range = (range_type == TOKEN_DOT_DOT_EQ) ? 2 : 1; // 1 = inclusive, 2 = exclusive
+            free(end);
+        }
         return node;
     }
 
@@ -986,18 +1081,18 @@ static ASTNode *parse_pattern(Parser *p) {
             }
             char *fname = strdup(p->current.text);
             consume(p, TOKEN_IDENT);
-            ASTNode *val_pattern = NULL;
+            ASTNode *value = NULL;
             if (p->current.type == TOKEN_COLON) {
                 consume(p, TOKEN_COLON);
-                val_pattern = parse_pattern(p);
+                value = parse_pattern(p);
             } else {
                 // Shorthand: field name is also the binder
-                val_pattern = ast_new(AST_IDENT);
-                val_pattern->data.ident.name = strdup(fname);
+                value = ast_new(AST_IDENT);
+                value->data.ident.name = strdup(fname);
             }
             ASTNode *field_init = ast_new(AST_FIELD_INIT);
             field_init->data.field_init.name = fname;
-            field_init->data.field_init.value = val_pattern;
+            field_init->data.field_init.value = value;
             fields[field_count++] = field_init;
             if (p->current.type == TOKEN_COMMA) {
                 consume(p, TOKEN_COMMA);
@@ -1141,9 +1236,9 @@ static ASTNode *parse_primary(Parser *p, int allow_struct_init) {
                     consume(p, TOKEN_COLON);
                     value = parse_expression(p);
                 } else {
-                    ASTNode *vnode = ast_new(AST_IDENT);
-                    vnode->data.ident.name = strdup(fname);
-                    value = vnode;
+                    // Shorthand Point { x } -> x: x
+                    value = ast_new(AST_IDENT);
+                    value->data.ident.name = strdup(fname);
                 }
                 ASTNode *field = ast_new(AST_FIELD_INIT);
                 field->data.field_init.name = fname;
@@ -1345,7 +1440,22 @@ if_match_expr:
         ASTNode **arms = malloc(sizeof(ASTNode*) * 20);
         int arm_count = 0;
         while (p->current.type != TOKEN_RBRACE && p->current.type != TOKEN_EOF) {
+            // Parse the first pattern of the arm
             ASTNode *pattern = parse_pattern(p);
+            
+            // Handle or-patterns (e.g., 1 | 2 | 3)
+            ASTNode **or_patterns = NULL;
+            int or_pattern_count = 0;
+            while (p->current.type == TOKEN_BAR) {
+                consume(p, TOKEN_BAR);
+                if (or_patterns == NULL) {
+                    or_patterns = malloc(sizeof(ASTNode*) * 10);
+                    or_patterns[or_pattern_count++] = pattern;
+                }
+                ASTNode *next_pattern = parse_pattern(p);
+                or_patterns[or_pattern_count++] = next_pattern;
+            }
+            
             if (p->current.type == TOKEN_FAT_ARROW) consume(p, TOKEN_FAT_ARROW);
             else {
                  fprintf(stderr, "Expected => at line %d, got %d ('%s')\n", p->current.line, p->current.type, p->current.text);
@@ -1353,6 +1463,69 @@ if_match_expr:
                  p->current = p->next;
                  p->next = lexer_next_token(p->lexer);
                  continue;
+            }
+
+            // Check for guard expression (if <expr>)
+            ASTNode *guard_expr = NULL;
+            if (p->current.type == TOKEN_IF_LET) {
+                consume(p, TOKEN_IF_LET);
+                char *pattern_name = strdup(p->current.text);
+                consume(p, TOKEN_IDENT);
+                
+                ASTNode *pattern = parse_pattern(p);
+                
+                // Check for guard expression (if <expr>)
+                ASTNode *guard_expr = NULL;
+                if (p->current.type == TOKEN_IF) {
+                    consume(p, TOKEN_IF);
+                    guard_expr = parse_expression(p);
+                }
+                
+                ASTNode *body;
+                if (p->current.type == TOKEN_LBRACE) {
+                    body = parse_block(p);
+                } else {
+                    body = parse_expression(p);
+                    if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
+                }
+                
+                ASTNode *arm = ast_new(AST_MATCH_ARM);
+                arm->data.match_arm.pattern = pattern;
+                arm->data.match_arm.body = body;
+                arm->data.match_arm.guard_expr = guard_expr;
+                arm->data.match_arm.or_patterns = or_patterns;
+                arm->data.match_arm.or_pattern_count = or_pattern_count;
+                arms[arm_count++] = arm;
+                if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
+                if (arm_count >= 20) {
+                    arms = realloc(arms, sizeof(ASTNode*) * (arm_count + 20));
+                }
+            } else if (p->current.type == TOKEN_IF) {
+                consume(p, TOKEN_IF);
+                ASTNode *guard_expr = NULL;
+                if (p->current.type == TOKEN_IF) {
+                    consume(p, TOKEN_IF);
+                    guard_expr = parse_expression(p);
+                }
+                
+                ASTNode *body;
+                if (p->current.type == TOKEN_LBRACE) {
+                    body = parse_block(p);
+                } else {
+                    body = parse_expression(p);
+                    if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
+                }
+                ASTNode *arm = ast_new(AST_MATCH_ARM);
+                arm->data.match_arm.pattern = pattern;
+                arm->data.match_arm.body = body;
+                arm->data.match_arm.guard_expr = guard_expr;
+                arm->data.match_arm.or_patterns = or_patterns;
+                arm->data.match_arm.or_pattern_count = or_pattern_count;
+                arms[arm_count++] = arm;
+                if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
+                if (arm_count >= 20) {
+                    arms = realloc(arms, sizeof(ASTNode*) * (arm_count + 20));
+                }
             }
             
             ASTNode *body;
@@ -1362,9 +1535,13 @@ if_match_expr:
                 body = parse_expression(p);
                 if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
             }
+
             ASTNode *arm = ast_new(AST_MATCH_ARM);
             arm->data.match_arm.pattern = pattern;
             arm->data.match_arm.body = body;
+            arm->data.match_arm.guard_expr = guard_expr;
+            arm->data.match_arm.or_patterns = or_patterns;
+            arm->data.match_arm.or_pattern_count = or_pattern_count;
             arms[arm_count++] = arm;
             if (p->current.type == TOKEN_COMMA) consume(p, TOKEN_COMMA);
             if (arm_count >= 20) {

@@ -10,6 +10,8 @@ typedef struct {
     Token next;
 } Parser;
 
+static ASTNode *parse_single_pattern_internal(Parser *p);
+
 void parser_init(Parser *p, Lexer *l);
 Token parser_peek(Parser *p);
 void real_consume(Parser *p, TokenType type, int call_line, const char *type_name);
