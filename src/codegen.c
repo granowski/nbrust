@@ -1140,15 +1140,28 @@ static void codegen_node_ext(ASTNode *node, FILE *out, int is_expr) {
             char *p = clean_name;
             while (*p) { if (*p == ':' && *(p+1) == ':') { *p = '_'; memmove(p+1, p+2, strlen(p+2)+1); } p++; }
 
+            if (strcmp(clean_name, "println") == 0 || strcmp(clean_name, "print") == 0) {
+                fprintf(out, "printf(");
+                for (int i = 0; i < node->data.call.arg_count; i++) {
+                    codegen_node_ext(node->data.call.args[i], out, 1);
+                    if (i < node->data.call.arg_count - 1) fprintf(out, ", ");
+                }
+                fprintf(out, ")");
+                if (strcmp(clean_name, "println") == 0) fprintf(out, "; printf(\"\\n\")");
+                free(clean_name);
+                break;
+            }
+
             // Handle specialized Option::None and other unit variants
             if (node->resolved_type && node->resolved_type->kind == TYPE_ENUM) {
                  char *mangled = strdup(node->resolved_type->data.enum_type.name);
-                 char *orig_variant = strrchr(clean_name, '_');
-                 if (orig_variant) {
-                     orig_variant++;
+                 char *orig_variant_ptr = strrchr(clean_name, '_');
+                 if (orig_variant_ptr) {
+                     char *orig_variant = strdup(orig_variant_ptr + 1);
                      free(clean_name);
                      clean_name = malloc(strlen(mangled) + strlen(orig_variant) + 2);
                      sprintf(clean_name, "%s_%s", mangled, orig_variant);
+                     free(orig_variant);
                  } else if (strstr(node->data.call.name, "::")) {
                      char *variant = strstr(node->data.call.name, "::") + 2;
                      free(clean_name);

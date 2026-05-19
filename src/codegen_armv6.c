@@ -179,6 +179,28 @@ static void codegen_expr(ASTNode *node, FILE *out, Target target) {
                 fprintf(out, "    mov r1, r0\n");
                 fprintf(out, "    pop {r0}\n");
                 fprintf(out, "    str r1, [r0]\n");
+            } else if (strcmp(node->data.call.name, "println") == 0 || strcmp(node->data.call.name, "print") == 0) {
+                for (int i = 0; i < node->data.call.arg_count && i < 4; i++) {
+                    codegen_expr(node->data.call.args[i], out, target);
+                    fprintf(out, "    push {r0}\n");
+                }
+                for (int i = (node->data.call.arg_count > 4 ? 4 : node->data.call.arg_count) - 1; i >= 0; i--) {
+                    fprintf(out, "    pop {r%d}\n", i);
+                }
+                if (target.os == OS_MACOS) {
+                    fprintf(out, "    bl _printf\n");
+                } else {
+                    fprintf(out, "    bl printf\n");
+                }
+                if (strcmp(node->data.call.name, "println") == 0) {
+                    const char *nl_label = add_string_constant("\\n");
+                    fprintf(out, "    ldr r0, =%s\n", nl_label);
+                    if (target.os == OS_MACOS) {
+                        fprintf(out, "    bl _printf\n");
+                    } else {
+                        fprintf(out, "    bl printf\n");
+                    }
+                }
             } else {
                 // Pass arguments in r0-r3
                 for (int i = 0; i < node->data.call.arg_count && i < 4; i++) {

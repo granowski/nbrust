@@ -194,6 +194,33 @@ static void codegen_expr(ASTNode *node, FILE *out, Target target) {
                     fprintf(out, "    ldr x0, [sp], #16\n");
                     fprintf(out, "    str w1, [x0, #8]\n");
                 }
+            } else if (strcmp(node->data.call.name, "println") == 0 || strcmp(node->data.call.name, "print") == 0) {
+                // Pass arguments in x0-x7
+                for (int i = 0; i < node->data.call.arg_count && i < 8; i++) {
+                    codegen_expr(node->data.call.args[i], out, target);
+                    fprintf(out, "    str x0, [sp, #-16]!\n");
+                }
+                for (int i = node->data.call.arg_count - 1; i >= 0 && i < 8; i--) {
+                    fprintf(out, "    ldr x%d, [sp], #16\n", i);
+                }
+
+                if (target.os == OS_MACOS) {
+                    fprintf(out, "    bl _printf\n");
+                } else {
+                    fprintf(out, "    bl printf\n");
+                }
+                if (strcmp(node->data.call.name, "println") == 0) {
+                    const char *nl_label = add_string_constant("\\n");
+                    if (target.os == OS_MACOS) {
+                        fprintf(out, "    adrp x0, %s@PAGE\n", nl_label);
+                        fprintf(out, "    add x0, x0, %s@PAGEOFF\n", nl_label);
+                        fprintf(out, "    bl _printf\n");
+                    } else {
+                        fprintf(out, "    adrp x0, %s\n", nl_label);
+                        fprintf(out, "    add x0, x0, :lo12:%s\n", nl_label);
+                        fprintf(out, "    bl printf\n");
+                    }
+                }
             } else {
                 // Pass arguments in x0-x7
                 for (int i = 0; i < node->data.call.arg_count && i < 8; i++) {
