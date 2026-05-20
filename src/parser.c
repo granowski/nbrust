@@ -1826,7 +1826,14 @@ ASTNode *parse_type_alias(Parser *p) {
     if (p->current.type == TOKEN_COLON) {
         // Type bounds on alias? Unlikely but let's be safe
         consume(p, TOKEN_COLON);
-        while (p->current.type != TOKEN_EQUAL && p->current.type != TOKEN_SEMICOLON && p->current.type != TOKEN_LBRACE && p->current.type != TOKEN_EOF) {
+        int depth = 0;
+        while (p->current.type != TOKEN_EOF) {
+            if (p->current.type == TOKEN_LT) depth++;
+            if (p->current.type == TOKEN_GT) depth--;
+            
+            if (depth == 0 && (p->current.type == TOKEN_EQUAL || p->current.type == TOKEN_SEMICOLON || p->current.type == TOKEN_LBRACE)) {
+                break;
+            }
             consume(p, p->current.type);
         }
     }
