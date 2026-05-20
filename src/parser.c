@@ -878,34 +878,52 @@ static char *parse_type(Parser *p) {
         } else if (p->current.type == TOKEN_LT) {
             // Generic type or Box<T>
             consume(p, TOKEN_LT);
-            char *ptype = parse_type(p);
-            while (p->current.type == TOKEN_COMMA) {
-                consume(p, TOKEN_COMMA);
-                char *more = parse_type(p);
-                char *new_ptype = malloc(strlen(ptype) + 2 + strlen(more) + 1);
-                sprintf(new_ptype, "%s, %s", ptype, more);
-                free(ptype);
-                free(more);
-                ptype = new_ptype;
+            char *ptype_buf = strdup("");
+            int first = 1;
+            while (p->current.type != TOKEN_GT && p->current.type != TOKEN_EOF) {
+                if (!first) {
+                    if (p->current.type == TOKEN_COMMA) {
+                        consume(p, TOKEN_COMMA);
+                    } else {
+                        break; 
+                    }
+                }
+                first = 0;
+                
+                // Handle possible trailing comma or empty generics
+                if (p->current.type == TOKEN_GT) break;
+
+                char *arg = parse_type(p);
+                if (p->current.type == TOKEN_EQUAL) {
+                    consume(p, TOKEN_EQUAL);
+                    char *val = parse_type(p);
+                    char *combined = malloc(strlen(arg) + 3 + strlen(val) + 1);
+                    sprintf(combined, "%s = %s", arg, val);
+                    free(arg); free(val);
+                    arg = combined;
+                }
+                
+                if (strlen(ptype_buf) == 0) {
+                    free(ptype_buf);
+                    ptype_buf = arg;
+                } else {
+                    char *new_ptype = malloc(strlen(ptype_buf) + 2 + strlen(arg) + 1);
+                    sprintf(new_ptype, "%s, %s", ptype_buf, arg);
+                    free(ptype_buf);
+                    free(arg);
+                    ptype_buf = new_ptype;
+                }
             }
             
-            // Handle Trait bounds in generics like Iterator<Item = T>
-            if (p->current.type == TOKEN_EQUAL) {
-                consume(p, TOKEN_EQUAL);
-                char *bound_type = parse_type(p);
-                char *new_ptype = malloc(strlen(ptype) + 3 + strlen(bound_type) + 1);
-                sprintf(new_ptype, "%s = %s", ptype, bound_type);
-                free(ptype);
-                free(bound_type);
-                ptype = new_ptype;
+            if (p->current.type == TOKEN_GT) {
+                consume(p, TOKEN_GT);
             }
-
-            consume(p, TOKEN_GT);
-            char *full_type = malloc(strlen(type_name) + 2 + strlen(ptype) + 1);
-            sprintf(full_type, "%s<%s>", type_name, ptype);
+            
+            char *full_type = malloc(strlen(type_name) + 2 + strlen(ptype_buf) + 1);
+            sprintf(full_type, "%s<%s>", type_name, ptype_buf);
             strcat(buf, full_type);
             free(full_type);
-            free(ptype);
+            free(ptype_buf);
             free(type_name);
         } else {
             strcat(buf, type_name);

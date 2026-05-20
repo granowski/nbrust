@@ -13,35 +13,66 @@ static char current_impl_struct[256] = "";
 
 static const char* map_type(const char* rust_type) {
     if (!rust_type) return "int";
+    // fprintf(stderr, "DEBUG: map_type('%s')\n", rust_type);
 
-    // Skip qualifiers
-    if (strncmp(rust_type, "mut ", 4) == 0) return map_type(rust_type + 4);
-    if (strncmp(rust_type, "const ", 6) == 0) return map_type(rust_type + 6);
-    if (strcmp(rust_type, "mut") == 0 || strcmp(rust_type, "const") == 0 || rust_type[0] == '\0') return "";
+    static char bufs[16][512];
+    static int buf_idx = 0;
+    char *buf = bufs[buf_idx];
+    buf_idx = (buf_idx + 1) % 16;
 
-    if (rust_type[0] == '&') {
-        const char *inner = map_type(rust_type + 1);
-        static char ref_buf[256];
-        snprintf(ref_buf, sizeof(ref_buf), "%s*", inner);
-        return ref_buf;
+    // Skip qualifiers robustly
+    while (rust_type) {
+        while (isspace(*rust_type)) rust_type++;
+        if (strncmp(rust_type, "mut ", 4) == 0) rust_type += 4;
+        else if (strncmp(rust_type, "const ", 6) == 0) rust_type += 6;
+        else if (strncmp(rust_type, "struct ", 7) == 0) rust_type += 7;
+        else break;
     }
+    
+    if (strcmp(rust_type, "mut") == 0 || strcmp(rust_type, "const") == 0 || rust_type[0] == '\0') return "int";
 
-    if (rust_type[0] == '*') {
-        const char *inner = map_type(rust_type + 1);
-        static char ptr_buf[256];
-        snprintf(ptr_buf, sizeof(ptr_buf), "%s*", inner);
-        return ptr_buf;
+    int len = strlen(rust_type);
+    int is_const = 0;
+    if (rust_type[0] == '&' || rust_type[0] == '*' || (len > 0 && rust_type[len-1] == '*')) {
+        const char *inner_rust;
+        char *temp_inner = NULL;
+        if (rust_type[0] == '&' || rust_type[0] == '*') {
+            inner_rust = rust_type + 1;
+        } else {
+            temp_inner = strdup(rust_type);
+            temp_inner[len-1] = '\0';
+            inner_rust = temp_inner;
+        }
+        
+        while (strncmp(inner_rust, "mut ", 4) == 0 || strncmp(inner_rust, "const ", 6) == 0) {
+            if (strncmp(inner_rust, "mut ", 4) == 0) inner_rust += 4;
+            else { inner_rust += 6; is_const = 1; }
+        }
+        const char *inner = map_type(inner_rust);
+        if (is_const) snprintf(buf, 512, "const %s*", inner);
+        else snprintf(buf, 512, "%s*", inner);
+        if (temp_inner) free(temp_inner);
+        return buf;
     }
 
     if (strcmp(rust_type, "void") == 0) return "void";
-    if (strcmp(rust_type, "i32") == 0 || strcmp(rust_type, "int") == 0 || strcmp(rust_type, "T") == 0 || strcmp(rust_type, "V") == 0 || strcmp(rust_type, "K") == 0 || strcmp(rust_type, "Self_Item") == 0) return "i32";
-    if (strcmp(rust_type, "u32") == 0 || strcmp(rust_type, "unsigned int") == 0) return "u32";
-    if (strcmp(rust_type, "i64") == 0 || strcmp(rust_type, "long long") == 0) return "i64";
-    if (strcmp(rust_type, "u64") == 0 || strcmp(rust_type, "unsigned long long") == 0) return "u64";
-    if (strcmp(rust_type, "usize") == 0 || strcmp(rust_type, "size_t") == 0) return "usize";
-    if (strcmp(rust_type, "isize") == 0 || strcmp(rust_type, "ssize_t") == 0) return "isize";
-    if (strcmp(rust_type, "i8") == 0 || strcmp(rust_type, "signed char") == 0 || strcmp(rust_type, "char") == 0) return "i8";
-    if (strcmp(rust_type, "u8") == 0 || strcmp(rust_type, "unsigned char") == 0) return "u8";
+    if (strcmp(rust_type, "i32") == 0 || strcmp(rust_type, "int") == 0 || 
+        strcmp(rust_type, "T") == 0 || strcmp(rust_type, "V") == 0 || 
+        strcmp(rust_type, "K") == 0 || strcmp(rust_type, "E") == 0 || 
+        strcmp(rust_type, "R") == 0 || strcmp(rust_type, "Self_Item") == 0) return "int";
+
+    if (current_impl_struct[0] != '\0' && (strcmp(rust_type, "self") == 0 || strcmp(rust_type, "Self") == 0)) {
+        snprintf(buf, 512, "struct %s", current_impl_struct);
+        return buf;
+    }
+
+    if (strcmp(rust_type, "u32") == 0 || strcmp(rust_type, "unsigned int") == 0) return "unsigned int";
+    if (strcmp(rust_type, "i64") == 0 || strcmp(rust_type, "long long") == 0) return "long long";
+    if (strcmp(rust_type, "u64") == 0 || strcmp(rust_type, "unsigned long long") == 0) return "unsigned long long";
+    if (strcmp(rust_type, "usize") == 0 || strcmp(rust_type, "size_t") == 0) return "size_t";
+    if (strcmp(rust_type, "isize") == 0 || strcmp(rust_type, "ssize_t") == 0) return "ssize_t";
+    if (strcmp(rust_type, "i8") == 0 || strcmp(rust_type, "signed char") == 0 || strcmp(rust_type, "char") == 0) return "char";
+    if (strcmp(rust_type, "u8") == 0 || strcmp(rust_type, "unsigned char") == 0) return "unsigned char";
     if (strcmp(rust_type, "i16") == 0 || strcmp(rust_type, "short") == 0) return "int16_t";
     if (strcmp(rust_type, "u16") == 0 || strcmp(rust_type, "unsigned short") == 0) return "uint16_t";
     if (strcmp(rust_type, "bool") == 0) return "int";
@@ -50,14 +81,11 @@ static const char* map_type(const char* rust_type) {
     if (strcmp(rust_type, "String") == 0 || strcmp(rust_type, "str") == 0 || strcmp(rust_type, "&str") == 0) return "char*";
     
     if (strncmp(rust_type, "dyn ", 4) == 0) {
-        static char trait_buf[256];
-        snprintf(trait_buf, sizeof(trait_buf), "struct %s_object", rust_type + 4);
-        return trait_buf;
+        snprintf(buf, 512, "struct %s_object", rust_type + 4);
+        return buf;
     }
 
-    if (strncmp(rust_type, "struct ", 7) == 0) return rust_type;
-
-    static char buf[512];
+    // Handle nested generics as a fallback
     if (strchr(rust_type, '<')) {
         char *copy = strdup(rust_type);
         char *lt = strchr(copy, '<');
@@ -68,15 +96,12 @@ static const char* map_type(const char* rust_type) {
             char *base = copy;
             char *args_str = lt + 1;
             
-            snprintf(buf, sizeof(buf), "struct %s", base);
+            snprintf(buf, 512, "struct %s", base);
             
             char *arg = strtok(args_str, ",");
             while (arg) {
                 while (isspace(*arg)) arg++;
-                
                 strcat(buf, "_");
-                
-                // Simplified mangling for C compatibility
                 for (int i = 0; arg[i]; i++) {
                     if (arg[i] == '&') strcat(buf, "Ref");
                     else if (arg[i] == ' ') { /* skip */ }
@@ -86,176 +111,30 @@ static const char* map_type(const char* rust_type) {
                     else if (arg[i] == ']') { /* skip */ }
                     else {
                         int len = strlen(buf);
-                        if (len < sizeof(buf) - 2) {
-                            buf[len] = arg[i];
-                            buf[len+1] = '\0';
-                        }
+                        if (len < 510) { buf[len] = arg[i]; buf[len+1] = '\0'; }
                     }
                 }
                 arg = strtok(NULL, ",");
             }
-
-            // Map common Rust primitives to their C-style names used in specialization
-            if (strstr(buf, "_i32")) { char *p = strstr(buf, "_i32"); memcpy(p, "_i32", 4); memmove(p+4, p+4, strlen(p+4)+1); }
-            if (strstr(buf, "_int")) { char *p = strstr(buf, "_int"); memcpy(p, "_i32", 4); memmove(p+4, p+4, strlen(p+4)+1); }
-            if (strstr(buf, "_i8")) { char *p = strstr(buf, "_i8"); memcpy(p, "_i8", 3); memmove(p+3, p+3, strlen(p+3)+1); }
-            if (strstr(buf, "_u8")) { char *p = strstr(buf, "_u8"); memcpy(p, "_u8", 3); memmove(p+3, p+3, strlen(p+3)+1); }
-            if (strstr(buf, "_unsigned_char")) { char *p = strstr(buf, "_unsigned_char"); memcpy(p, "_u8", 3); memmove(p+3, p+14, strlen(p+14)+1); }
-            if (strstr(buf, "_signed_char")) { char *p = strstr(buf, "_signed_char"); memcpy(p, "_i8", 3); memmove(p+3, p+12, strlen(p+12)+1); }
-            if (strstr(buf, "_char")) { char *p = strstr(buf, "_char"); memcpy(p, "_i8", 3); memmove(p+3, p+5, strlen(p+5)+1); }
-            if (strstr(buf, "Ref_u8")) { char *p = strstr(buf, "Ref_u8"); memcpy(p, "Ref_u8", 6); memmove(p+6, p+6, strlen(p+6)+1); }
-            if (strstr(buf, "Ref_i8")) { char *p = strstr(buf, "Ref_i8"); memcpy(p, "Ref_i8", 6); memmove(p+6, p+6, strlen(p+6)+1); }
-            if (strstr(buf, "Ref_char")) { char *p = strstr(buf, "Ref_char"); memcpy(p, "Ref_i8", 6); memmove(p+6, p+8, strlen(p+8)+1); }
-            if (strstr(buf, "Ref_unsigned_char")) { char *p = strstr(buf, "Ref_unsigned_char"); memcpy(p, "Ref_u8", 6); memmove(p+6, p+17, strlen(p+17)+1); }
-            if (strstr(buf, "Ref_signed_char")) { char *p = strstr(buf, "Ref_signed_char"); memcpy(p, "Ref_i8", 6); memmove(p+6, p+15, strlen(p+15)+1); }
-            if (strstr(buf, "Ref_str")) { char *p = strstr(buf, "Ref_str"); memcpy(p, "Ref_str", 7); memmove(p+7, p+7, strlen(p+7)+1); }
-            
+            // Normalization
+            char *p;
+            while ((p = strstr(buf, "int"))) { memcpy(p, "i32", 3); }
             free(copy);
             return buf;
         }
         free(copy);
     }
-    
-    if (rust_type && rust_type[0] == '&') {
-        const char *inner = rust_type + 1;
-        if (strncmp(inner, "mut ", 4) == 0) inner += 4;
-        
-        if (inner[0] == '[') {
-            // Handle &[u8] etc
-            if (strstr(inner, "u8") || strstr(inner, "unsigned char")) return "unsigned char*";
-            return "void*";
-        }
-        
-        if (strcmp(inner, "self") == 0 || strcmp(inner, "Self") == 0) {
-             snprintf(buf, sizeof(buf), "struct %s*", current_impl_struct);
-             return buf;
-        }
-        const char *mapped_inner = map_type(inner);
-        if (strchr(mapped_inner, '*') || strncmp(mapped_inner, "struct ", 7) == 0 ||
-            strcmp(mapped_inner, "i32") == 0 || strcmp(mapped_inner, "u32") == 0 ||
-            strcmp(mapped_inner, "i64") == 0 || strcmp(mapped_inner, "u64") == 0 ||
-            strcmp(mapped_inner, "usize") == 0 || strcmp(mapped_inner, "isize") == 0 ||
-            strcmp(mapped_inner, "i8") == 0 || strcmp(mapped_inner, "u8") == 0 ||
-            strcmp(mapped_inner, "int") == 0 || strcmp(mapped_inner, "char") == 0 ||
-            strcmp(mapped_inner, "bool") == 0 || strcmp(mapped_inner, "float") == 0 ||
-            strcmp(mapped_inner, "double") == 0 || strcmp(mapped_inner, "void") == 0) {
-            snprintf(buf, sizeof(buf), "%s*", mapped_inner);
-        } else {
-            snprintf(buf, sizeof(buf), "struct %s*", mapped_inner);
-        }
-        return buf;
-    }
-    
-    if (rust_type[0] == '*') {
-        const char *inner = rust_type + 1;
-        int is_const = 0;
-        if (strncmp(inner, "mut ", 4) == 0) inner += 4;
-        else if (strncmp(inner, "const ", 6) == 0) {
-            inner += 6;
-            is_const = 1;
-        }
-        
-        if (strcmp(inner, "self") == 0 || strcmp(inner, "Self") == 0) {
-             snprintf(buf, sizeof(buf), "struct %s*", current_impl_struct);
-             return buf;
-        }
-        const char *mapped_inner = map_type(inner);
-        const char *const_prefix = is_const ? "const " : "";
-        if (strchr(mapped_inner, '*') || strncmp(mapped_inner, "struct ", 7) == 0 ||
-            strcmp(mapped_inner, "i32") == 0 || strcmp(mapped_inner, "u32") == 0 ||
-            strcmp(mapped_inner, "i64") == 0 || strcmp(mapped_inner, "u64") == 0 ||
-            strcmp(mapped_inner, "usize") == 0 || strcmp(mapped_inner, "isize") == 0 ||
-            strcmp(mapped_inner, "i8") == 0 || strcmp(mapped_inner, "u8") == 0 ||
-            strcmp(mapped_inner, "int") == 0 || strcmp(mapped_inner, "char") == 0 ||
-            strcmp(mapped_inner, "bool") == 0 || strcmp(mapped_inner, "float") == 0 ||
-            strcmp(mapped_inner, "double") == 0 || strcmp(mapped_inner, "void") == 0) {
-            snprintf(buf, sizeof(buf), "%s%s*", const_prefix, mapped_inner);
-        } else {
-            snprintf(buf, sizeof(buf), "%sstruct %s*", const_prefix, mapped_inner);
-        }
-        return buf;
-    }
 
-    if (strncmp(rust_type, "Box<", 4) == 0) {
-        char inner[256];
-        const char *start = rust_type + 4;
-        const char *end = strrchr(rust_type, '>');
-        if (end) {
-            int len = end - start;
-            strncpy(inner, start, len);
-            inner[len] = '\0';
-            snprintf(buf, sizeof(buf), "%s*", map_type(inner));
+    if (strcmp(rust_type, "self") == 0 || strcmp(rust_type, "Self") == 0) {
+        if (current_impl_struct[0] != '\0') {
+            snprintf(buf, 512, "struct %s", current_impl_struct);
             return buf;
         }
+        return "struct self";
     }
     
-    if (strchr(rust_type, '<') || strchr(rust_type, '&')) {
-        static char mono_buf[512];
-        strncpy(mono_buf, rust_type, sizeof(mono_buf)-1);
-        mono_buf[sizeof(mono_buf)-1] = '\0';
-        char *p = mono_buf;
-        while (*p) {
-            if (*p == '<' || *p == '>' || *p == ',' || *p == ' ' || *p == '&' || *p == '*') *p = '_';
-            p++;
-        }
-        while (p > mono_buf && *(p-1) == '_') {
-            *(p-1) = '\0';
-            p--;
-        }
-        return mono_buf;
-    }
-
-    if (current_impl_struct[0] != '\0' && (strcmp(rust_type, "self") == 0 || strcmp(rust_type, "Self") == 0)) {
-        snprintf(buf, sizeof(buf), "struct %s", current_impl_struct);
-        return buf;
-    }
-    
-    if (rust_type && (strncmp(rust_type, "struct ", 7) == 0 || strchr(rust_type, '*') || 
-        strcmp(rust_type, "int") == 0 || strcmp(rust_type, "char") == 0 || 
-        strcmp(rust_type, "float") == 0 || strcmp(rust_type, "double") == 0 ||
-        strcmp(rust_type, "void") == 0 || strcmp(rust_type, "size_t") == 0 ||
-        strcmp(rust_type, "ssize_t") == 0 || strcmp(rust_type, "unsigned int") == 0 ||
-        strcmp(rust_type, "unsigned char") == 0 || strcmp(rust_type, "long long") == 0 ||
-        strstr(rust_type, "_object") || strstr(rust_type, "_vtable"))) {
-        return rust_type;
-    }
-
-    // Generic structs mapping
-    if (rust_type && (strncmp(rust_type, "Vec", 3) == 0 || strncmp(rust_type, "Box", 3) == 0 || 
-                      strncmp(rust_type, "Option", 6) == 0 || strncmp(rust_type, "Result", 6) == 0 || 
-                      strncmp(rust_type, "Wrapper", 7) == 0 || strncmp(rust_type, "Call", 4) == 0 || 
-                      strncmp(rust_type, "Ident", 5) == 0 || strncmp(rust_type, "Post", 4) == 0 ||
-                      strncmp(rust_type, "RefIdent", 8) == 0 ||
-                      strstr(rust_type, "_i32") || strstr(rust_type, "_u8") || strstr(rust_type, "_i8") ||
-                      strstr(rust_type, "_Ident") || strstr(rust_type, "_RefIdent"))) {
-        static char struct_buf[256];
-        snprintf(struct_buf, sizeof(struct_buf), "struct %s", rust_type);
-        return struct_buf;
-    }
-    
-    // Handle slice/array mapping to C
-    if (rust_type && (strcmp(rust_type, "[u8]") == 0 || strcmp(rust_type, "&[u8]") == 0 || 
-                      strcmp(rust_type, "mut [u8]") == 0 || strcmp(rust_type, "&mut [u8]") == 0 ||
-                      strcmp(rust_type, "unsigned char[]") == 0)) {
-        return "unsigned char*";
-    }
-    if (rust_type && rust_type[0] == '[') {
-        return "void*";
-    }
-    
-    // Handle Box/Option/Result special cases for C naming
-    if (strcmp(rust_type, "Box") == 0) return "void*";
-    if (strcmp(rust_type, "Option") == 0) return "struct Option";
-    if (strcmp(rust_type, "Result") == 0) return "struct Result";
-    if (strcmp(rust_type, "Vec") == 0) return "struct Vec";
-    if (strcmp(rust_type, "String") == 0) return "struct String";
-    if (strcmp(rust_type, "u8") == 0) return "unsigned char";
-    if (strcmp(rust_type, "i8") == 0) return "char";
-    if (strcmp(rust_type, "i32") == 0) return "int";
-    if (strcmp(rust_type, "u32") == 0) return "unsigned int";
-    if (strcmp(rust_type, "usize") == 0) return "size_t";
-
-    snprintf(buf, sizeof(buf), "struct %s", rust_type);
+    // Default for structs/enums: ensure 'struct ' prefix if not present and not primitive
+    snprintf(buf, 512, "struct %s", rust_type);
     return buf;
 }
 
