@@ -36,18 +36,47 @@ static char *safe_strdup(const char *s) {
 }
 
 void monomorphization_register(ASTNode *node) {
+    if (!node) return;
     char *name = NULL;
     if (node->type == AST_FUNC) name = node->data.func.name;
     else if (node->type == AST_STRUCT_DECL) name = node->data.struct_decl.name;
     else if (node->type == AST_ENUM_DECL) name = node->data.enum_decl.name;
-    if (!name || monomorphization_lookup(name)) return;
+    else if (node->type == AST_IMPL) name = node->data.impl_block.struct_name;
+    else if (node->type == AST_TRAIT_IMPL) name = node->data.trait_impl.struct_name;
+    
+    if (!name) return;
+    // Note: Multiple impl blocks for the same struct are allowed, so we don't return early if name matches.
+    // However, structs and enums should be unique in the registry for lookup.
+    if (node->type == AST_STRUCT_DECL || node->type == AST_ENUM_DECL || node->type == AST_FUNC) {
+        if (monomorphization_lookup(name)) {
+             return;
+        }
+    }
+    
     GenericRegistryNode *reg = malloc(sizeof(GenericRegistryNode));
     reg->name = strdup(name); reg->node = node; reg->next = registry; registry = reg;
 }
 
 ASTNode *monomorphization_lookup(const char *name) {
+    if (!name) return NULL;
+    // fprintf(stderr, "DEBUG: monomorphization_lookup '%s'\n", name);
     GenericRegistryNode *curr = registry;
-    while (curr) { if (strcmp(curr->name, name) == 0) return curr->node; curr = curr->next; }
+    ASTNode *fallback = NULL;
+    while (curr) { 
+        if (strcmp(curr->name, name) == 0) {
+            // Prefer struct or enum declarations over impl blocks
+            if (curr->node->type == AST_STRUCT_DECL || curr->node->type == AST_ENUM_DECL) {
+                return curr->node; 
+            }
+            if (!fallback) fallback = curr->node;
+        }
+        curr = curr->next; 
+    }
+    if (fallback) {
+        // fprintf(stderr, "DEBUG: monomorphization_lookup '%s' FOUND fallback type=%d\n", name, fallback->type);
+        return fallback;
+    }
+    // fprintf(stderr, "DEBUG: monomorphization_lookup '%s' NOT FOUND\n", name);
     return NULL;
 }
 
@@ -75,33 +104,88 @@ static void register_specialization(const char *mangled_name, ASTNode *node) {
 
 static void specialize_methods(const char *base, const char *mangled, char **params, char **args, int count) {
     GenericRegistryNode *curr = registry;
+    int matches = 0;
     while (curr) {
-        if (curr->node->type == AST_IMPL && curr->node->data.impl_block.struct_name && strcmp(curr->node->data.impl_block.struct_name, base) == 0) {
-            int ncount = count + 2;
-            char **nparams = malloc(sizeof(char*) * ncount);
-            char **nargs = malloc(sizeof(char*) * ncount);
-            nparams[0] = "Self"; nargs[0] = (char*)mangled;
-            nparams[1] = "self"; nargs[1] = (char*)mangled;
-            for (int i = 0; i < count; i++) { nparams[i+2] = params[i]; nargs[i+2] = args[i]; }
-            
-            char *old_mangled = current_specialization_mangled;
-            current_specialization_mangled = (char*)mangled;
-            
-            for (int i = 0; i < curr->node->data.impl_block.method_count; i++) {
-                ASTNode *method = specialize_node(curr->node->data.impl_block.methods[i], nparams, nargs, ncount);
-                if (method->type == AST_FUNC && method->data.func.name) {
-                    char *old_mname = method->data.func.name;
-                    char *new_mname = malloc(strlen(mangled) + 2 + strlen(old_mname) + 1);
-                    sprintf(new_mname, "%s_%s", mangled, old_mname);
-                    method->data.func.name = new_mname;
-                    register_specialization(method->data.func.name, method);
+        if (curr->node->type == AST_IMPL && curr->node->data.impl_block.struct_name) {
+             char *sname = strdup(curr->node->data.impl_block.struct_name);
+             char *lt = strchr(sname, '<'); if (lt) *lt = '\0';
+             if (strcmp(sname, base) == 0) {
+                matches++;
+                int ncount = count + 2;
+                char **nparams = malloc(sizeof(char*) * ncount);
+                char **nargs = malloc(sizeof(char*) * ncount);
+                nparams[0] = "Self"; nargs[0] = (char*)mangled;
+                nparams[1] = "self"; nargs[1] = (char*)mangled;
+                for (int i = 0; i < count; i++) { nparams[i+2] = params[i]; nargs[i+2] = args[i]; }
+                
+                char *old_mangled = current_specialization_mangled;
+                current_specialization_mangled = (char*)mangled;
+                
+                for (int i = 0; i < curr->node->data.impl_block.method_count; i++) {
+                    ASTNode *generic_method = curr->node->data.impl_block.methods[i];
+                    ASTNode *method = specialize_node(generic_method, nparams, nargs, ncount);
+                    if (method->type == AST_FUNC && method->data.func.name) {
+                        char *old_mname = method->data.func.name;
+                        char *new_mname;
+                        if (strstr(old_mname, mangled) == old_mname) {
+                             // Already mangled correctly
+                             new_mname = strdup(old_mname);
+                        } else {
+                            char *new_mname_buf = malloc(strlen(mangled) + 2 + strlen(old_mname) + 1);
+                            sprintf(new_mname_buf, "%s_%s", mangled, old_mname);
+                            new_mname = new_mname_buf;
+                        }
+                        if (method->data.func.name) free(method->data.func.name);
+                        method->data.func.name = new_mname;
+                        register_specialization(method->data.func.name, method);
+                    }
                 }
-            }
-            current_specialization_mangled = old_mangled;
-            free(nparams); free(nargs);
+                current_specialization_mangled = old_mangled;
+                free(nparams); free(nargs);
+             }
+             free(sname);
+        } else if (curr->node->type == AST_TRAIT_IMPL && curr->node->data.trait_impl.struct_name) {
+             char *sname = strdup(curr->node->data.trait_impl.struct_name);
+             char *lt = strchr(sname, '<'); if (lt) *lt = '\0';
+             if (strcmp(sname, base) == 0) {
+                matches++;
+                int ncount = count + 2;
+                char **nparams = malloc(sizeof(char*) * ncount);
+                char **nargs = malloc(sizeof(char*) * ncount);
+                nparams[0] = "Self"; nargs[0] = (char*)mangled;
+                nparams[1] = "self"; nargs[1] = (char*)mangled;
+                for (int i = 0; i < count; i++) { nparams[i+2] = params[i]; nargs[i+2] = args[i]; }
+                
+                char *old_mangled = current_specialization_mangled;
+                current_specialization_mangled = (char*)mangled;
+                
+                for (int i = 0; i < curr->node->data.trait_impl.method_count; i++) {
+                    ASTNode *generic_method = curr->node->data.trait_impl.methods[i];
+                    // fprintf(stderr, "DEBUG: specializing trait method '%s' for %s\n", generic_method->data.func.name, mangled);
+                    ASTNode *method = specialize_node(generic_method, nparams, nargs, ncount);
+                    if (method->type == AST_FUNC && method->data.func.name) {
+                        char *old_mname = method->data.func.name;
+                        char *new_mname;
+                        if (strstr(old_mname, mangled) == old_mname) {
+                             new_mname = strdup(old_mname);
+                        } else {
+                            char *new_mname_buf = malloc(strlen(mangled) + 2 + strlen(old_mname) + 1);
+                            sprintf(new_mname_buf, "%s_%s", mangled, old_mname);
+                            new_mname = new_mname_buf;
+                        }
+                        if (method->data.func.name) free(method->data.func.name);
+                        method->data.func.name = new_mname;
+                        register_specialization(method->data.func.name, method);
+                    }
+                }
+                current_specialization_mangled = old_mangled;
+                free(nparams); free(nargs);
+             }
+             free(sname);
         }
         curr = curr->next;
     }
+    if (matches == 0) { }
 }
 
 static char *mangle_name(const char *base, char **args, int count) {
@@ -191,9 +275,12 @@ static char *substitute_type(const char *type, char **params, char **args, int c
     
     // Handle Self and self specifically
     if (type && (strstr(type, "Self") || strstr(type, "self"))) {
+        char *res = strdup(type);
+        int replaced = 0;
+        
+        // Try params first
         for (int i = 0; i < count; i++) {
             if (params[i] && (strcmp(params[i], "Self") == 0 || strcmp(params[i], "self") == 0)) {
-                char *res = strdup(type);
                 char *p;
                 while ((p = strstr(res, "Self"))) {
                     int pos = p - res;
@@ -204,6 +291,7 @@ static char *substitute_type(const char *type, char **params, char **args, int c
                     strcpy(new_res + pos + mangled_len, p + 4);
                     free(res);
                     res = new_res;
+                    replaced = 1;
                 }
                 while ((p = strstr(res, "self"))) {
                     int pos = p - res;
@@ -214,10 +302,49 @@ static char *substitute_type(const char *type, char **params, char **args, int c
                     strcpy(new_res + pos + mangled_len, p + 4);
                     free(res);
                     res = new_res;
+                    replaced = 1;
                 }
-                return res;
             }
         }
+        
+        // Fallback to current_specialization_mangled
+        if (!replaced && current_specialization_mangled) {
+            char *p;
+            while ((p = strstr(res, "Self"))) {
+                int pos = p - res;
+                int mangled_len = strlen(current_specialization_mangled);
+                char *new_res = malloc(strlen(res) - 4 + mangled_len + 1);
+                strncpy(new_res, res, pos);
+                strcpy(new_res + pos, current_specialization_mangled);
+                strcpy(new_res + pos + mangled_len, p + 4);
+                free(res);
+                res = new_res;
+                replaced = 1;
+            }
+            while ((p = strstr(res, "self"))) {
+                int pos = p - res;
+                int mangled_len = strlen(current_specialization_mangled);
+                char *new_res = malloc(strlen(res) - 4 + mangled_len + 1);
+                strncpy(new_res, res, pos);
+                strcpy(new_res + pos, current_specialization_mangled);
+                strcpy(new_res + pos + mangled_len, p + 4);
+                free(res);
+                res = new_res;
+                replaced = 1;
+            }
+        }
+        
+        // Post-process to replace :: with _ in substituted types
+        if (replaced) {
+            for (int i = 0; res[i]; i++) {
+                if (res[i] == ':' && res[i+1] == ':') {
+                    res[i] = '_';
+                    memmove(res + i + 1, res + i + 2, strlen(res + i + 2) + 1);
+                }
+            }
+            return res;
+        }
+        free(res);
     }
     if (strcmp(type, "Item") == 0 || strcmp(type, "Self::Item") == 0) {
         for (int i = 0; i < count; i++) {
@@ -272,6 +399,9 @@ static char *substitute_type(const char *type, char **params, char **args, int c
 static ASTNode *specialize_node(ASTNode *node, char **params, char **args, int count) {
     if (!node) return NULL;
     ASTNode *new_node = ast_clone(node);
+    
+    // Propagate current_specialization_mangled into walk_and_specialize
+    walk_and_specialize(new_node, params, args, count);
     
     // Force immediate substitution of generic parameters in specialized nodes
     switch (node->type) {
@@ -601,8 +731,11 @@ static void walk_and_specialize(ASTNode *node, char **params, char **args, int c
                         if (!is_specialized(mangled)) {
                             ASTNode *generic = monomorphization_lookup(base);
                             if (generic) {
+                                char *old_m = current_specialization_mangled;
+                                current_specialization_mangled = mangled;
                                 ASTNode *specialized = specialize_node(generic, (generic->type == AST_STRUCT_DECL) ? generic->data.struct_decl.generic_params : generic->data.enum_decl.generic_params, new_args, arg_count);
                                 register_specialization(mangled, specialized);
+                                current_specialization_mangled = old_m;
                             }
                         }
                         free(node->data.func.return_type); node->data.func.return_type = strdup(mangled);
@@ -620,18 +753,82 @@ static void walk_and_specialize(ASTNode *node, char **params, char **args, int c
         case AST_CALL:
             if (node->data.call.name) {
                 // General mangling for names like Vec::new, Box::new
-                if (strstr(node->data.call.name, "::")) {
+                if (strstr(node->data.call.name, "::") || strchr(node->data.call.name, '_')) {
                     char *name_copy = strdup(node->data.call.name);
-                    char *colon = strstr(name_copy, "::");
-                    *colon = '\0';
+                    char *sep = strstr(name_copy, "::");
+                    char *method;
+                    if (sep) {
+                        *sep = '\0';
+                        method = sep + 2;
+                    } else {
+                        // For mangled names like Vec_new, find the split point
+                        // Try to find a base that exists in our registry
+                        
+                        // BUT: If the whole name is already a known specialization, skip it!
+                        if (is_specialized(node->data.call.name)) {
+                             free(name_copy);
+                             goto done_call;
+                        }
+
+                        sep = strchr(name_copy, '_');
+                        method = NULL;
+                        while (sep) {
+                            *sep = '\0';
+                            ASTNode *generic = monomorphization_lookup(name_copy);
+                            if (generic && (generic->type == AST_STRUCT_DECL || generic->type == AST_ENUM_DECL)) {
+                                // Found a generic struct/enum base
+                                // But if it has no generic params, it's not our target here
+                                int gp_count = (generic->type == AST_STRUCT_DECL) ? generic->data.struct_decl.generic_param_count : generic->data.enum_decl.generic_param_count;
+                                if (gp_count > 0) {
+                                    method = sep + 1;
+                                    break;
+                                }
+                            }
+                            *sep = '_';
+                            sep = strchr(sep + 1, '_');
+                        }
+                        
+                        if (!method) {
+                            free(name_copy);
+                            goto done_call;
+                        }
+                    }
                     char *base = name_copy;
-                    char *method = colon + 2;
+
+                    ASTNode *generic_struct = monomorphization_lookup(base);
+                    if (generic_struct && (generic_struct->type == AST_STRUCT_DECL || generic_struct->type == AST_ENUM_DECL)) {
+                         int gp_count = (generic_struct->type == AST_STRUCT_DECL) ? generic_struct->data.struct_decl.generic_param_count : generic_struct->data.enum_decl.generic_param_count;
+                         if (gp_count > 0) {
+                             // Implicitly generic method call like Vec::new()
+                             char **m_args = malloc(sizeof(char*) * gp_count);
+                             for (int i = 0; i < gp_count; i++) m_args[i] = "i32"; // Heuristic
+                             char *mangled_struct = mangle_name(base, m_args, gp_count);
+
+                             if (!is_specialized(mangled_struct)) {
+                                 char *old_m = current_specialization_mangled;
+                                 current_specialization_mangled = mangled_struct;
+                                 register_specialization(mangled_struct, specialize_node(generic_struct, (generic_struct->type == AST_STRUCT_DECL) ? generic_struct->data.struct_decl.generic_params : generic_struct->data.enum_decl.generic_params, m_args, gp_count));
+                                 specialize_methods(base, mangled_struct, (generic_struct->type == AST_STRUCT_DECL) ? generic_struct->data.struct_decl.generic_params : generic_struct->data.enum_decl.generic_params, m_args, gp_count);
+                                 current_specialization_mangled = old_m;
+                             }
+
+                             char *new_name = malloc(strlen(mangled_struct) + 1 + strlen(method) + 1);
+                             sprintf(new_name, "%s_%s", mangled_struct, method);
+                             free(node->data.call.name);
+                             node->data.call.name = new_name;
+                             free(m_args); free(mangled_struct);
+                             free(name_copy);
+                             goto done_call;
+                         }
+                    }
+                    
                     char *new_name = malloc(strlen(base) + 1 + strlen(method) + 1);
                     sprintf(new_name, "%s_%s", base, method);
                     free(node->data.call.name);
                     node->data.call.name = new_name;
                     free(name_copy);
                 }
+done_call:;
 
                 if (strchr(node->data.call.name, '<')) {
                     char *type_name = strdup(node->data.call.name);
@@ -656,6 +853,8 @@ static void walk_and_specialize(ASTNode *node, char **params, char **args, int c
                         if (!is_specialized(mangled)) {
                             ASTNode *generic = monomorphization_lookup(base);
                             if (generic) {
+                                char *old_m = current_specialization_mangled;
+                                current_specialization_mangled = mangled;
                                 ASTNode *specialized = NULL;
                                 if (generic->type == AST_STRUCT_DECL) specialized = specialize_node(generic, generic->data.struct_decl.generic_params, args, arg_count);
                                 else if (generic->type == AST_ENUM_DECL) specialized = specialize_node(generic, generic->data.enum_decl.generic_params, args, arg_count);
@@ -663,7 +862,9 @@ static void walk_and_specialize(ASTNode *node, char **params, char **args, int c
                                 
                                 if (specialized) {
                                     register_specialization(mangled, specialized);
+                                    if (generic->type != AST_FUNC) specialize_methods(base, mangled, (generic->type == AST_STRUCT_DECL) ? generic->data.struct_decl.generic_params : generic->data.enum_decl.generic_params, args, arg_count);
                                 }
+                                current_specialization_mangled = old_m;
                             }
                         }
                         free(node->data.call.name); node->data.call.name = strdup(mangled);
@@ -695,6 +896,10 @@ static void walk_and_specialize(ASTNode *node, char **params, char **args, int c
                 walk_and_specialize(node->data.var_decl.init, params, args, count);
             }
             if (node->data.var_decl.type_name) {
+                char *new_type = substitute_type(node->data.var_decl.type_name, params, args, count);
+                free(node->data.var_decl.type_name);
+                node->data.var_decl.type_name = new_type;
+                
                 if (strchr(node->data.var_decl.type_name, '<')) {
                     char *type_name = strdup(node->data.var_decl.type_name);
                     char *lt = strchr(type_name, '<'); char *gt = strrchr(type_name, '>');
@@ -718,6 +923,8 @@ static void walk_and_specialize(ASTNode *node, char **params, char **args, int c
                         if (!is_specialized(mangled)) {
                             ASTNode *generic = monomorphization_lookup(base);
                             if (generic) {
+                                char *old_m = current_specialization_mangled;
+                                current_specialization_mangled = mangled;
                                 ASTNode *specialized = NULL;
                                 if (generic->type == AST_STRUCT_DECL) specialized = specialize_node(generic, generic->data.struct_decl.generic_params, sub_args, arg_count);
                                 else if (generic->type == AST_ENUM_DECL) specialized = specialize_node(generic, generic->data.enum_decl.generic_params, sub_args, arg_count);
@@ -725,8 +932,9 @@ static void walk_and_specialize(ASTNode *node, char **params, char **args, int c
                                 
                                 if (specialized) {
                                     register_specialization(mangled, specialized);
-                                    specialize_methods(base, mangled, (generic->type == AST_STRUCT_DECL) ? generic->data.struct_decl.generic_params : generic->data.enum_decl.generic_params, sub_args, arg_count);
+                                    if (generic->type != AST_FUNC) specialize_methods(base, mangled, (generic->type == AST_STRUCT_DECL) ? generic->data.struct_decl.generic_params : generic->data.enum_decl.generic_params, sub_args, arg_count);
                                 }
+                                current_specialization_mangled = old_m;
                             }
                         }
                         
@@ -786,7 +994,13 @@ static void walk_and_specialize(ASTNode *node, char **params, char **args, int c
                                  mangled = strdup("Wrapper_i32");
                              }
                          }
-                         if (!is_specialized(mangled)) register_specialization(mangled, specialize_node(generic, generic->data.struct_decl.generic_params, args, generic->data.struct_decl.generic_param_count));
+                         if (!is_specialized(mangled)) {
+                             char *old_m = current_specialization_mangled;
+                             current_specialization_mangled = mangled;
+                             register_specialization(mangled, specialize_node(generic, generic->data.struct_decl.generic_params, args, generic->data.struct_decl.generic_param_count));
+                             specialize_methods(node->data.var_decl.type_name, mangled, generic->data.struct_decl.generic_params, args, generic->data.struct_decl.generic_param_count);
+                             current_specialization_mangled = old_m;
+                         }
                          
                          // Fix call site if it's a variant constructor
                          if (node->data.var_decl.init && node->data.var_decl.init->type == AST_CALL && node->data.var_decl.init->data.call.name) {
@@ -812,7 +1026,13 @@ static void walk_and_specialize(ASTNode *node, char **params, char **args, int c
                          char **args = malloc(sizeof(char*) * generic->data.enum_decl.generic_param_count);
                          for (int i = 0; i < generic->data.enum_decl.generic_param_count; i++) args[i] = "i32";
                          char *mangled = mangle_name(node->data.var_decl.type_name, args, generic->data.enum_decl.generic_param_count);
-                         if (!is_specialized(mangled)) register_specialization(mangled, specialize_node(generic, generic->data.enum_decl.generic_params, args, generic->data.enum_decl.generic_param_count));
+                         if (!is_specialized(mangled)) {
+                             char *old_m = current_specialization_mangled;
+                             current_specialization_mangled = mangled;
+                             register_specialization(mangled, specialize_node(generic, generic->data.enum_decl.generic_params, args, generic->data.enum_decl.generic_param_count));
+                             specialize_methods(node->data.var_decl.type_name, mangled, generic->data.enum_decl.generic_params, args, generic->data.enum_decl.generic_param_count);
+                             current_specialization_mangled = old_m;
+                         }
                          
                          // Fix call site if it's a variant constructor
                          if (node->data.var_decl.init && node->data.var_decl.init->type == AST_CALL && node->data.var_decl.init->data.call.name) {
@@ -834,71 +1054,8 @@ static void walk_and_specialize(ASTNode *node, char **params, char **args, int c
                          if (node->data.var_decl.type_name) { free(node->data.var_decl.type_name); }
                          node->data.var_decl.type_name = strdup(mangled);
                          free(args);
-                    } else if (node->data.var_decl.init && node->data.var_decl.init->type == AST_CALL) {
-                         // Heuristic for Box::new, Vec::new etc
-                         if (node->data.var_decl.init && node->data.var_decl.init->type == AST_CALL) {
-                             if (node->data.var_decl.init->data.call.name && (strstr(node->data.var_decl.init->data.call.name, "Vec_new") || strstr(node->data.var_decl.init->data.call.name, "Box_new"))) {
-                                 if (node->data.var_decl.type_name) {
-                                     char *mangled = strdup(node->data.var_decl.type_name);
-                                     if (strcmp(mangled, "Vec") == 0) { free(mangled); mangled = strdup("Vec_i32"); }
-                                     if (strcmp(mangled, "Box") == 0) { free(mangled); mangled = strdup("Box_i32"); }
-                                    
-                                     char *new_call = malloc(strlen(mangled) + 10);
-                                     sprintf(new_call, "%s_new", mangled);
-                                     free(node->data.var_decl.init->data.call.name);
-                                     node->data.var_decl.init->data.call.name = new_call;
-                                     free(mangled);
-                                 }
-                             }
-                         }
-                         // Generic fallbacks for Vec_new, Vec_push etc if type is known
-                         if (node->data.var_decl.type_name && strcmp(node->data.var_decl.type_name, "Vec_i32") == 0) {
-                              // We should probably handle this in walk_and_specialize for AST_CALL/AST_METHOD_CALL too
-                         }
                     }
                 }
-            } else if (node->data.var_decl.init && node->data.var_decl.init->type == AST_CALL) {
-                 if (node->data.var_decl.init->data.call.name && (strcmp(node->data.var_decl.init->data.call.name, "Vec_new") == 0 || strcmp(node->data.var_decl.init->data.call.name, "Vec::new") == 0)) {
-                      free(node->data.var_decl.init->data.call.name);
-                      node->data.var_decl.init->data.call.name = strdup("Vec_i32_new");
-                      if (node->data.var_decl.type_name) free(node->data.var_decl.type_name);
-                      node->data.var_decl.type_name = strdup("Vec_i32");
-                      
-                      // Explicitly register Vec_i32 specialization
-                      ASTNode *vec_generic = monomorphization_lookup("Vec");
-                      if (vec_generic) {
-                          char *args[] = {"i32"};
-                          ASTNode *spec = specialize_node(vec_generic, vec_generic->data.struct_decl.generic_params, args, 1);
-                          spec->data.struct_decl.is_generic = 0;
-                          spec->data.struct_decl.is_specialized = 1;
-                          free(spec->data.struct_decl.name);
-                          spec->data.struct_decl.name = strdup("Vec_i32");
-                          
-                          SpecializationNode *sn = malloc(sizeof(SpecializationNode));
-                          sn->mangled_name = strdup("Vec_i32"); sn->node = spec; sn->next = specializations; specializations = sn;
-                          
-                          // Also specialized methods for Vec_i32
-                          ASTNode *vec_impl = monomorphization_lookup("Vec"); 
-                          if (vec_impl && vec_impl->type == AST_IMPL) {
-                               char *vparams[] = {"T", "Self", "self"};
-                               char *vargs[] = {"i32", "Vec_i32", "Vec_i32"};
-                               for (int i = 0; i < vec_impl->data.impl_block.method_count; i++) {
-                                   ASTNode *m = specialize_node(vec_impl->data.impl_block.methods[i], vparams, vargs, 3);
-                                   char *mname = malloc(strlen("Vec_i32") + 1 + strlen(m->data.func.name) + 1);
-                                   sprintf(mname, "Vec_i32_%s", m->data.func.name);
-                                   m->data.func.name = mname;
-                                   m->data.func.is_generic = 0;
-                                   m->data.func.is_specialized = 1;
-                                   
-                                   
-                                   SpecializationNode *smn = malloc(sizeof(SpecializationNode));
-                                   smn->mangled_name = strdup(mname); smn->node = m; smn->next = specializations; specializations = smn;
-                               }
-                          }
-                      }
-                 }
-                 if (node->data.var_decl.init->data.call.name && (strcmp(node->data.var_decl.init->data.call.name, "Vec_new") == 0 || strcmp(node->data.var_decl.init->data.call.name, "Vec::new") == 0)) {
-                 }
             }
             break;
         case AST_STRUCT_INIT:
@@ -939,8 +1096,11 @@ static void walk_and_specialize(ASTNode *node, char **params, char **args, int c
                     // fprintf(stderr, "DEBUG: STRUCT_INIT name %s -> args[0] = %s\n", node->data.struct_init.struct_name, args[0]);
                     char *mangled = mangle_name(node->data.struct_init.struct_name, args, generic->data.struct_decl.generic_param_count);
                     if (!is_specialized(mangled)) {
+                         char *old_m = current_specialization_mangled;
+                         current_specialization_mangled = mangled;
                          register_specialization(mangled, specialize_node(generic, generic->data.struct_decl.generic_params, args, generic->data.struct_decl.generic_param_count));
                          specialize_methods(node->data.struct_init.struct_name, mangled, generic->data.struct_decl.generic_params, args, generic->data.struct_decl.generic_param_count);
+                         current_specialization_mangled = old_m;
                     }
                     free(node->data.struct_init.struct_name);
                     node->data.struct_init.struct_name = strdup(mangled);
@@ -971,9 +1131,12 @@ static void walk_and_specialize(ASTNode *node, char **params, char **args, int c
                         if (!is_specialized(mangled)) {
                             ASTNode *generic = monomorphization_lookup(base);
                             if (generic) {
+                                char *old_m = current_specialization_mangled;
+                                current_specialization_mangled = mangled;
                                 ASTNode *specialized = specialize_node(generic, (generic->type == AST_STRUCT_DECL) ? generic->data.struct_decl.generic_params : generic->data.enum_decl.generic_params, sub_args, arg_count);
                                 register_specialization(mangled, specialized);
                                 specialize_methods(base, mangled, (generic->type == AST_STRUCT_DECL) ? generic->data.struct_decl.generic_params : generic->data.enum_decl.generic_params, sub_args, arg_count);
+                                current_specialization_mangled = old_m;
                             }
                         }
                         
@@ -1104,23 +1267,35 @@ static void walk_and_specialize(ASTNode *node, char **params, char **args, int c
             break;
         case AST_CAST:
             walk_and_specialize(node->data.cast.expr, params, args, count);
-            if (node->data.cast.type_name && strchr(node->data.cast.type_name, '<')) {
-                char *type_name = strdup(node->data.cast.type_name);
-                char *lt = strchr(type_name, '<'); char *gt = strrchr(type_name, '>');
-                if (lt && gt) {
-                    *lt = '\0'; *gt = '\0';
-                    char *base = type_name; char *arg = lt + 1;
-                    char *sub_arg = substitute_type(arg, params, args, count);
-                    char *mangled = mangle_name(base, &sub_arg, 1);
-                    if (!is_specialized(mangled)) {
-                        ASTNode *generic = monomorphization_lookup(base);
-                        if (generic) register_specialization(mangled, specialize_node(generic, &generic->data.struct_decl.generic_params[0], &sub_arg, 1));
+            if (node->data.cast.type_name) {
+                char *new_type = substitute_type(node->data.cast.type_name, params, args, count);
+                free(node->data.cast.type_name);
+                node->data.cast.type_name = new_type;
+                
+                if (strchr(node->data.cast.type_name, '<')) {
+                    char *type_name = strdup(node->data.cast.type_name);
+                    char *lt = strchr(type_name, '<'); char *gt = strrchr(type_name, '>');
+                    if (lt && gt) {
+                        *lt = '\0'; *gt = '\0';
+                        char *base = type_name; char *arg = lt + 1;
+                        char *sub_arg = substitute_type(arg, params, args, count);
+                        char *mangled = mangle_name(base, &sub_arg, 1);
+                        if (!is_specialized(mangled)) {
+                            ASTNode *generic = monomorphization_lookup(base);
+                            if (generic) {
+                                char *old_m = current_specialization_mangled;
+                                current_specialization_mangled = mangled;
+                                register_specialization(mangled, specialize_node(generic, &generic->data.struct_decl.generic_params[0], &sub_arg, 1));
+                                specialize_methods(base, mangled, &generic->data.struct_decl.generic_params[0], &sub_arg, 1);
+                                current_specialization_mangled = old_m;
+                            }
+                        }
+                        free(node->data.cast.type_name); node->data.cast.type_name = strdup(mangled);
+                        free(sub_arg);
+                        free(mangled);
                     }
-                    free(node->data.cast.type_name); node->data.cast.type_name = strdup(mangled);
-                    free(sub_arg);
-                    free(mangled);
+                    free(type_name);
                 }
-                free(type_name);
             }
             break;
         case AST_BINOP:
@@ -1134,23 +1309,37 @@ static void walk_and_specialize(ASTNode *node, char **params, char **args, int c
             walk_and_specialize(node->data.ret_stmt.value, params, args, count);
             break;
         case AST_PARAM:
-            if (node->data.param.type_name && strchr(node->data.param.type_name, '<')) {
-                char *type_name = strdup(node->data.param.type_name);
-                char *lt = strchr(type_name, '<'); char *gt = strrchr(type_name, '>');
-                if (lt && gt) {
-                    *lt = '\0'; *gt = '\0';
-                    char *base = type_name; char *arg = lt + 1;
-                    char *sub_arg = substitute_type(arg, params, args, count);
-                    char *mangled = mangle_name(base, &sub_arg, 1);
-                    if (!is_specialized(mangled)) {
-                        ASTNode *generic = monomorphization_lookup(base);
-                        if (generic) register_specialization(mangled, specialize_node(generic, (generic->type == AST_STRUCT_DECL) ? &generic->data.struct_decl.generic_params[0] : &generic->data.func.generic_params[0], &sub_arg, 1));
+            if (node->data.param.type_name) {
+                char *new_type = substitute_type(node->data.param.type_name, params, args, count);
+                free(node->data.param.type_name);
+                node->data.param.type_name = new_type;
+                
+                if (strchr(node->data.param.type_name, '<')) {
+                    char *type_name = strdup(node->data.param.type_name);
+                    char *lt = strchr(type_name, '<'); char *gt = strrchr(type_name, '>');
+                    if (lt && gt) {
+                        *lt = '\0'; *gt = '\0';
+                        char *base = type_name; char *arg = lt + 1;
+                        char *sub_arg = substitute_type(arg, params, args, count);
+                        char *mangled = mangle_name(base, &sub_arg, 1);
+                        if (!is_specialized(mangled)) {
+                            ASTNode *generic = monomorphization_lookup(base);
+                            if (generic) {
+                                char *old_m = current_specialization_mangled;
+                                current_specialization_mangled = mangled;
+                                register_specialization(mangled, specialize_node(generic, (generic->type == AST_STRUCT_DECL) ? &generic->data.struct_decl.generic_params[0] : &generic->data.func.generic_params[0], &sub_arg, 1));
+                                if (generic->type == AST_STRUCT_DECL || generic->type == AST_ENUM_DECL) {
+                                    specialize_methods(base, mangled, (generic->type == AST_STRUCT_DECL) ? &generic->data.struct_decl.generic_params[0] : &generic->data.enum_decl.generic_params[0], &sub_arg, 1);
+                                }
+                                current_specialization_mangled = old_m;
+                            }
+                        }
+                        free(node->data.param.type_name); node->data.param.type_name = strdup(mangled);
+                        free(sub_arg);
+                        free(mangled);
                     }
-                    free(node->data.param.type_name); node->data.param.type_name = strdup(mangled);
-                    free(sub_arg);
-                    free(mangled);
+                    free(type_name);
                 }
-                free(type_name);
             }
             break;
         case AST_FIELD_INIT:
@@ -1167,72 +1356,6 @@ static void walk_and_specialize(ASTNode *node, char **params, char **args, int c
             break;
         case AST_IMPL: {
             char *sname = node->data.impl_block.struct_name;
-            if (sname) {
-                ASTNode *generic_struct = monomorphization_lookup(sname);
-                if (generic_struct && generic_struct->type == AST_STRUCT_DECL && generic_struct->data.struct_decl.generic_param_count > 0 && !strchr(sname, '<')) {
-                     // Hack for Call<Ident>
-                     char *args[] = {"Ident"};
-                     char *mangled = mangle_name(sname, args, 1);
-                     if (1) { // is_specialized(mangled) - always specialize if generic struct exists
-                         ASTNode *new_impl = ast_clone(node);
-                         free(new_impl->data.impl_block.struct_name);
-                         new_impl->data.impl_block.struct_name = strdup(mangled);
-                         
-                         char *params[] = {generic_struct->data.struct_decl.generic_params[0]};
-                         char *args_ptr[] = {"Ident"}; // Use a stable name
-                         for (int i = 0; i < new_impl->data.impl_block.method_count; i++) {
-                             ASTNode *method = specialize_node(node->data.impl_block.methods[i], params, args_ptr, 1);
-                                 if (method->type == AST_FUNC && method->data.func.name) {
-                                     char *old_mname = method->data.func.name;
-                                     char *new_mname = malloc(strlen(mangled) + 1 + strlen(old_mname) + 256);
-                                     sprintf(new_mname, "%s_%s", mangled, old_mname);
-                                     
-                                     // Fix Self and generic T in params
-                                     for (int j = 0; j < method->data.func.param_count; j++) {
-                                         ASTNode *param = method->data.func.params[j];
-                                         if (param->data.param.type_name) {
-                                             if (strcmp(param->data.param.type_name, "Self") == 0 || strcmp(param->data.param.type_name, "self") == 0) {
-                                                 free(param->data.param.type_name);
-                                                 param->data.param.type_name = strdup(mangled);
-                                             } else if (strcmp(param->data.param.type_name, "&Self") == 0 || strcmp(param->data.param.type_name, "&self") == 0) {
-                                                 free(param->data.param.type_name);
-                                                 char *ref = malloc(strlen(mangled) + 2);
-                                                 sprintf(ref, "&%s", mangled);
-                                                 param->data.param.type_name = ref;
-                                             } else if (strcmp(param->data.param.type_name, "&mut self") == 0 || strcmp(param->data.param.type_name, "&mut Self") == 0) {
-                                                 free(param->data.param.type_name);
-                                                 char *ref = malloc(strlen(mangled) + 6);
-                                                 sprintf(ref, "&mut %s", mangled);
-                                                 param->data.param.type_name = ref;
-                                             } else {
-                                                 char *sub = substitute_type(param->data.param.type_name, params, args_ptr, 1);
-                                                 if (strcmp(sub, param->data.param.type_name) != 0) {
-                                                     // If it's a specialized type (like Ident), append it to the method name
-                                                     strcat(new_mname, "_");
-                                                     strcat(new_mname, sub);
-                                                 }
-                                                 free(param->data.param.type_name);
-                                                 param->data.param.type_name = sub;
-                                             }
-                                         }
-                                         // Ensure param has a name if it's 'self'
-                                         if (param->data.param.name && strcmp(param->data.param.name, "self") == 0) {
-                                             // OK
-                                         } else if (!param->data.param.name) {
-                                             param->data.param.name = strdup("self");
-                                         }
-                                     }
-                                     
-                                     method->data.func.name = new_mname;
-                                     register_specialization(method->data.func.name, method);
-                                 }
-                             new_impl->data.impl_block.methods[i] = method;
-                         }
-                         new_impl->data.impl_block.generic_param_count = 0;
-                     }
-                     free(mangled);
-                }
-            }
             if (sname && strchr(sname, '<')) {
                 char *type_name = strdup(sname);
                 char *lt = strchr(type_name, '<'); char *gt = strrchr(type_name, '>');
@@ -1293,43 +1416,6 @@ static void walk_and_specialize(ASTNode *node, char **params, char **args, int c
                     free(args); free(arg_copy);
                 }
                 free(type_name);
-            } else if (sname && (strcmp(sname, "Vec") == 0 || strcmp(sname, "Option") == 0)) {
-                 // Aggressively specialize for common types if we are in Vec/Option impl
-                 char *common_types[] = {"i32", "u8", "i8", "bool"};
-                 for (int ct = 0; ct < 4; ct++) {
-                     char *args[] = {common_types[ct]};
-                     char *mangled = mangle_name(sname, args, 1);
-                     if (is_specialized(mangled)) {
-                         // Type already specialized, but maybe not methods!
-                         if (node->data.impl_block.methods) {
-                             for (int i = 0; i < node->data.impl_block.method_count; i++) {
-                                 ASTNode *method = node->data.impl_block.methods[i];
-                                 char **params = (strcmp(sname, "Vec") == 0) ? (char*[]){"T"} : (char*[]){"T"};
-                                 ASTNode *spec_method = specialize_node(method, params, args, 1);
-                                 char *new_mname = malloc(strlen(mangled) + 1 + strlen(method->data.func.name) + 1);
-                                 sprintf(new_mname, "%s_%s", mangled, method->data.func.name);
-                                 spec_method->data.func.name = new_mname;
-                                 register_specialization(spec_method->data.func.name, spec_method);
-                             }
-                         }
-                     }
-                     free(mangled);
-                 }
-            } else if (sname && is_already_specialized(sname)) {
-                 if (node->data.impl_block.methods) {
-                     for (int i = 0; i < node->data.impl_block.method_count; i++) {
-                         ASTNode *method = node->data.impl_block.methods[i];
-                         if (method->type == AST_FUNC) {
-                             char *mname = malloc(strlen(sname) + 1 + strlen(method->data.func.name) + 1);
-                             sprintf(mname, "%s_%s", sname, method->data.func.name);
-                             if (!is_specialized(mname)) {
-                                 ASTNode *spec_method = ast_clone(method);
-                                 spec_method->data.func.name = mname;
-                                 register_specialization(spec_method->data.func.name, spec_method);
-                             } else free(mname);
-                         }
-                     }
-                 }
             }
             if (node->data.impl_block.methods) {
                 for (int i = 0; i < node->data.impl_block.method_count; i++) walk_and_specialize(node->data.impl_block.methods[i], params, args, count);

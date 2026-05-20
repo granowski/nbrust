@@ -2418,10 +2418,10 @@ ASTNode *parse_function(Parser *p) {
                 ASTNode *param = ast_new(AST_PARAM);
                 param->data.param.name = strdup("self");
                 // Simplified type name representation
-                if (is_ref && is_mut) param->data.param.type_name = strdup("&mut self");
-                else if (is_ref) param->data.param.type_name = strdup("&self");
-                else if (is_mut) param->data.param.type_name = strdup("mut self");
-                else param->data.param.type_name = strdup("self");
+                if (is_ref && is_mut) param->data.param.type_name = strdup("&mut Self");
+                else if (is_ref) param->data.param.type_name = strdup("&Self");
+                else if (is_mut) param->data.param.type_name = strdup("mut Self");
+                else param->data.param.type_name = strdup("Self");
                 params[param_count++] = param;
             } else {
                 // Was not self, must be a normal parameter with mut

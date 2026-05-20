@@ -130,6 +130,8 @@ static const char* map_type(const char* rust_type) {
             snprintf(buf, 512, "struct %s", current_impl_struct);
             return buf;
         }
+        // Fallback for monomorphized methods where current_impl_struct might be empty
+        // We should try to find if we are inside a function whose name starts with a struct name
         return "struct self";
     }
     

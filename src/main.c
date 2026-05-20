@@ -107,7 +107,8 @@ int main(int argc, char **argv) {
         int is_generic = (ast->type == AST_FUNC && ast->data.func.generic_param_count > 0) ||
                          (ast->type == AST_STRUCT_DECL && ast->data.struct_decl.generic_param_count > 0) ||
                          (ast->type == AST_ENUM_DECL && ast->data.enum_decl.generic_param_count > 0) ||
-                         (ast->type == AST_IMPL && ast->data.impl_block.generic_param_count > 0);
+                         (ast->type == AST_IMPL && ast->data.impl_block.generic_param_count > 0) ||
+                         (ast->type == AST_TRAIT_IMPL && ast->data.trait_impl.generic_param_count > 0);
         if (is_generic) monomorphization_register(ast);
     }
 
